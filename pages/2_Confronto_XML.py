@@ -754,8 +754,10 @@ if not df_recebimentos.empty:
                 try:
                     df_prot = pd.read_excel(arquivo_prot)
                     header_idx = -1
-                    for i, r in df_prot.head(20).iterrows():
-                        row_str = str(r.values).lower()
+                    
+                    # Usa uma união de strings para impedir que a Nuvem abrevie (trunque) as colunas
+                    for i, r in df_prot.head(50).iterrows():
+                        row_str = " ".join([str(val).lower() for val in r.values])
                         if "produto" in row_str and "quantidade" in row_str and "documento" in row_str:
                             header_idx = i
                             break
