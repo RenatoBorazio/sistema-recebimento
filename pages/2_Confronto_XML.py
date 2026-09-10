@@ -31,35 +31,21 @@ def limpar_zeros_pedido(ped):
     return p
 
 def carregar_bases():
-    # --- CARREGAR CADASTRO (SB1) (RACIONAL ORIGINAL) ---
+    # --- CARREGAR CADASTRO (SB1) ---
     try:
         df_cad = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
         if not df_cad.empty:
-            # Padroniza as colunas recuperando a formatação original do seu sistema antigo
-            # (só mapeia a 1ª coluna de origem que bater com cada nome-alvo, para não
-            # criar duas colunas com o mesmo nome final se o relatório trouxer mais de
-            # uma variante, ex: 'CODIGO' e 'CÓDIGO INTERNO' juntos)
             colunas_mapeadas = {}
-            alvos_usados = set()
             for c in df_cad.columns:
                 nome_upper = str(c).upper().strip()
-                if nome_upper in ['CÓDIGO DE BARRAS', 'COD BARRAS', 'EAN', 'CODIGO DE BARRAS', 'COD. BARRAS']: alvo = 'CÓDIGO DE BARRAS'
-                elif nome_upper in ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO INTERNO']: alvo = 'CÓDIGO INTERNO'
-                elif nome_upper in ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME']: alvo = 'DESCRIÇÃO SB1'
-                elif nome_upper in ['FATOR', 'FATOR CONV.', 'FATOR CONVERSAO']: alvo = 'FATOR'
-                elif nome_upper in ['ULTIMO PRECO', 'PRECO VENDA', 'CUSTO STAND.', 'ULTIMO PREÇO', 'ULT. PRECO']: alvo = 'ULTIMO PRECO'
-                else: alvo = None
-
-                if alvo and alvo not in alvos_usados:
-                    colunas_mapeadas[c] = alvo
-                    alvos_usados.add(alvo)
+                if nome_upper in ['CÓDIGO DE BARRAS', 'COD BARRAS', 'EAN', 'CODIGO DE BARRAS', 'COD. BARRAS']: colunas_mapeadas[c] = 'CÓDIGO DE BARRAS'
+                elif nome_upper in ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO INTERNO']: colunas_mapeadas[c] = 'CÓDIGO INTERNO'
+                elif nome_upper in ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME']: colunas_mapeadas[c] = 'DESCRIÇÃO SB1'
+                elif nome_upper in ['FATOR', 'FATOR CONV.', 'FATOR CONVERSAO']: colunas_mapeadas[c] = 'FATOR'
+                elif nome_upper in ['ULTIMO PRECO', 'PRECO VENDA', 'CUSTO STAND.', 'ULTIMO PREÇO', 'ULT. PRECO']: colunas_mapeadas[c] = 'ULTIMO PRECO'
             
             df_cad.rename(columns=colunas_mapeadas, inplace=True)
-            # Trava de segurança: se ainda assim sobrar alguma coluna duplicada
-            # (nome repetido vindo direto do relatório), mantém só a primeira.
-            df_cad = df_cad.loc[:, ~df_cad.columns.duplicated()]
             
-            # Garante que as colunas existam mesmo se a planilha falhar
             for col in ['CÓDIGO DE BARRAS', 'CÓDIGO INTERNO', 'DESCRIÇÃO SB1', 'FATOR', 'ULTIMO PRECO']:
                 if col not in df_cad.columns: df_cad[col] = ""
 
@@ -74,31 +60,23 @@ def carregar_bases():
         st.error(f"Erro interno ao ler o Cadastro (SB1): {e}")
         df_cad = pd.DataFrame()
         
-    # --- CARREGAR BASE DE PEDIDOS (PC) (RACIONAL ORIGINAL) ---
+    # --- CARREGAR BASE DE PEDIDOS (PC) ---
     try:
         df_pc = conn.query("SELECT * FROM base_pedidos", ttl=0).astype(str)
         if not df_pc.empty:
             colunas_mapeadas_pc = {}
-            alvos_usados_pc = set()
             for c in df_pc.columns:
                 nome_upper = str(c).upper().strip()
-                if nome_upper in ['NUMERO PC', 'NUMERO', 'PEDIDO']: alvo = 'Numero PC'
-                elif nome_upper in ['COD BARRAS', 'EAN', 'BARRAS']: alvo = 'Cod Barras'
-                elif nome_upper in ['PRC UNITARIO', 'PRECO', 'PREÇO', 'UNITARIO']: alvo = 'Prc Unitario'
-                elif nome_upper in ['PED. ENCERR.', 'ENCERR']: alvo = 'Ped. Encerr.'
-                elif nome_upper in ['RESID. ELIM.', 'ELIM']: alvo = 'Resid. Elim.'
-                elif nome_upper in ['QUANTIDADE', 'QTD']: alvo = 'Quantidade'
-                elif nome_upper in ['QTD.ENTREGUE', 'ENTREGUE']: alvo = 'Qtd.Entregue'
-                elif nome_upper in ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO']: alvo = 'Produto'
-                else: alvo = None
-
-                if alvo and alvo not in alvos_usados_pc:
-                    colunas_mapeadas_pc[c] = alvo
-                    alvos_usados_pc.add(alvo)
+                if nome_upper in ['NUMERO PC', 'NUMERO', 'PEDIDO']: colunas_mapeadas_pc[c] = 'Numero PC'
+                elif nome_upper in ['COD BARRAS', 'EAN', 'BARRAS']: colunas_mapeadas_pc[c] = 'Cod Barras'
+                elif nome_upper in ['PRC UNITARIO', 'PRECO', 'PREÇO', 'UNITARIO']: colunas_mapeadas_pc[c] = 'Prc Unitario'
+                elif nome_upper in ['PED. ENCERR.', 'ENCERR']: colunas_mapeadas_pc[c] = 'Ped. Encerr.'
+                elif nome_upper in ['RESID. ELIM.', 'ELIM']: colunas_mapeadas_pc[c] = 'Resid. Elim.'
+                elif nome_upper in ['QUANTIDADE', 'QTD']: colunas_mapeadas_pc[c] = 'Quantidade'
+                elif nome_upper in ['QTD.ENTREGUE', 'ENTREGUE']: colunas_mapeadas_pc[c] = 'Qtd.Entregue'
+                elif nome_upper in ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO']: colunas_mapeadas_pc[c] = 'Produto'
 
             df_pc.rename(columns=colunas_mapeadas_pc, inplace=True)
-            # Trava de segurança: descarta duplicata remanescente, se houver.
-            df_pc = df_pc.loc[:, ~df_pc.columns.duplicated()]
             
             if 'Numero PC' not in df_pc.columns: raise KeyError("Coluna de Pedido não encontrada no PC.")
             if 'Cod Barras' not in df_pc.columns: raise KeyError("Coluna de Barras/EAN não encontrada no PC.")
@@ -302,7 +280,6 @@ def recalcular_pendentes(df):
             if ean_clean:
                 match_pc = df_pc[(df_pc['Numero PC'].astype(str) == final_po) & (df_pc['Cod Barras'].astype(str).str.lstrip('0') == ean_clean)]
             
-            # Se achou no PC por EAN, usa o código interno do PC
             if not match_pc.empty and not cod_interno and 'Produto' in match_pc.columns:
                 cod_interno = str(match_pc['Produto'].iloc[0]).strip().lstrip('0')
                 
@@ -316,7 +293,7 @@ def recalcular_pendentes(df):
         else: 
             status_list.append("Sem Pedido")
 
-        # 4. Cruzamento FINAL com o Cadastro (SB1) RECUADO PARA A LÓGICA ANTIGA
+        # 4. Cruzamento FINAL com o Cadastro (SB1)
         match_cad = pd.DataFrame()
         fator_cadastro = 1
         ult_preco = 0.0
@@ -326,14 +303,11 @@ def recalcular_pendentes(df):
             if ean_clean and 'CÓDIGO DE BARRAS' in df_cad.columns:
                 match_cad = df_cad[df_cad['CÓDIGO DE BARRAS'].astype(str).str.lstrip('0') == ean_clean]
             
-            # Se não achou pelo EAN, tenta pelo Código Interno!
             if match_cad.empty and cod_interno and 'CÓDIGO INTERNO' in df_cad.columns:
                 match_cad = df_cad[df_cad['CÓDIGO INTERNO'].astype(str).str.lstrip('0') == cod_interno]
                 
         if not match_cad.empty:
             fator_cadastro = int(match_cad['FATOR'].iloc[0]) if 'FATOR' in match_cad.columns else 1
-            if not fator_cadastro or fator_cadastro <= 0:
-                fator_cadastro = 1  # protege contra FATOR=0 vindo errado do cadastro
             ult_preco = float(match_cad['ULTIMO PRECO'].iloc[0]) if 'ULTIMO PRECO' in match_cad.columns else 0.0
             
             if 'DESCRIÇÃO SB1' in df_cad.columns:
@@ -343,8 +317,6 @@ def recalcular_pendentes(df):
             
         fator_ajustado = pd.to_numeric(row.get('FATOR AJUSTADO', 0), errors='coerce')
         fator_ativo = fator_cadastro if pd.isna(fator_ajustado) or fator_ajustado <= 0 else int(fator_ajustado)
-        if not fator_ativo or fator_ativo <= 0:
-            fator_ativo = 1  # protege contra FATOR AJUSTADO também zerado
             
         qtde_real = qCom * fator_ativo
         custo_unit_real = vUnCom / fator_ativo
@@ -544,51 +516,57 @@ if not df_recebimentos.empty:
                     status_tag = "🔴 [VERIFICAR]" if itens_com_divergencia else "🟢 [LIBERADO]"
                     
                     with st.expander(f"{status_tag} 🧾 NF: {nf} ({tipo_nf_atual}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=False):
-                        col1, col2 = st.columns([2, 2])
-                        with col1:
-                            novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual, key=f"ped_nf_{filial}_{nf}")
-                        
-                        cols_view = [
-                            "Duplicar", "Ação / Decisão", "Avisos", "Observações", "Pedido Considerado",
-                            "Pedido (Item)", "Código Interno", "Produto", "Produto (SB1)", "QTDE", "FATOR CONVERSÃO", 
-                            "FATOR AJUSTADO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", 
-                            "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"
-                        ]
-                        
-                        df_ed = st.data_editor(
-                            df_nf[cols_view],
-                            key=f"editor_nf_{filial}_{nf}",
-                            column_config={
-                                "Duplicar": st.column_config.CheckboxColumn("Duplicar ➕"),
-                                "Ação / Decisão": st.column_config.SelectboxColumn("Decisão", options=["Pendente", "Liberar Entrada", "Aguardar Correção", "Ajustar Pedido"]),
-                                "Pedido Considerado": st.column_config.TextColumn("Pedido Considerado"),
-                                "Pedido (Item)": st.column_config.TextColumn("Pedido Específico (Item)", help="Vírgulas aqui quebram APENAS esta linha."),
-                                "Código Interno": st.column_config.TextColumn("Código Interno ✏️", help="Editável. Digite o código caso não tenha sido localizado automaticamente."),
-                                "Produto": st.column_config.TextColumn("Produto (XML)"),
-                                "Produto (SB1)": st.column_config.TextColumn("Produto (SB1)"),
-                                "Avisos": st.column_config.TextColumn("Avisos Sistema"),
-                                "QTDE": st.column_config.NumberColumn("QTDE XML (Editar)", format="%.2f"),
-                                "FATOR AJUSTADO": st.column_config.NumberColumn("FATOR AJUSTADO", format="%d", min_value=1),
-                                "Variação Custo (%)": st.column_config.NumberColumn("Var. Custo (%)", format="%.2f %%"),
-                                "Custo Unitário Real": st.column_config.NumberColumn("Custo Líquido XML", format="R$ %.4f"),
-                                "Ult. Preço (SB1)": st.column_config.NumberColumn("Últ. Preço", format="R$ %.4f"),
-                                "Custo PC": st.column_config.NumberColumn("Custo PC", format="R$ %.4f"),
-                                "QTDE REAL": st.column_config.NumberColumn("QTDE REAL (XML)"),
-                                "Saldo Pedido (PC)": st.column_config.NumberColumn("Saldo Disp. (PC)")
-                            },
-                            disabled=["Pedido Considerado", "Produto", "Produto (SB1)", "Avisos", "FATOR CONVERSÃO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"],
-                            use_container_width=True, hide_index=True
-                        )
-                        dfs_todas_edicoes.append((filial, nf, novo_ped_nf, df_ed))
-                        
-                        colA, colB = st.columns(2)
-                        with colA:
-                            if st.button(f"💾 Salvar e Recalcular NF ({nf})", key=f"btn_salvar_{filial}_{nf}", use_container_width=True):
+                        # TRAVA DE FORMULÁRIO: Congela a tela até que o usuário clique no botão salvar!
+                        with st.form(key=f"form_nf_{filial}_{nf}"):
+                            col1, col2 = st.columns([2, 2])
+                            with col1:
+                                novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual)
+                            
+                            cols_view = [
+                                "Duplicar", "Ação / Decisão", "Avisos", "Observações", "Pedido Considerado",
+                                "Pedido (Item)", "Código Interno", "Produto", "Produto (SB1)", "QTDE", "FATOR CONVERSÃO", 
+                                "FATOR AJUSTADO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", 
+                                "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"
+                            ]
+                            
+                            df_ed = st.data_editor(
+                                df_nf[cols_view],
+                                key=f"editor_nf_{filial}_{nf}",
+                                column_config={
+                                    "Duplicar": st.column_config.CheckboxColumn("Duplicar ➕"),
+                                    "Ação / Decisão": st.column_config.SelectboxColumn("Decisão", options=["Pendente", "Liberar Entrada", "Aguardar Correção", "Ajustar Pedido"]),
+                                    "Pedido Considerado": st.column_config.TextColumn("Pedido Considerado"),
+                                    "Pedido (Item)": st.column_config.TextColumn("Pedido Específico (Item)", help="Vírgulas aqui quebram APENAS esta linha."),
+                                    "Código Interno": st.column_config.TextColumn("Código Interno ✏️", help="Editável. Digite o código caso não tenha sido localizado automaticamente."),
+                                    "Produto": st.column_config.TextColumn("Produto (XML)"),
+                                    "Produto (SB1)": st.column_config.TextColumn("Produto (SB1)"),
+                                    "Avisos": st.column_config.TextColumn("Avisos Sistema"),
+                                    "QTDE": st.column_config.NumberColumn("QTDE XML (Editar)", format="%.2f"),
+                                    "FATOR AJUSTADO": st.column_config.NumberColumn("FATOR AJUSTADO", format="%d", min_value=1),
+                                    "Variação Custo (%)": st.column_config.NumberColumn("Var. Custo (%)", format="%.2f %%"),
+                                    "Custo Unitário Real": st.column_config.NumberColumn("Custo Líquido XML", format="R$ %.4f"),
+                                    "Ult. Preço (SB1)": st.column_config.NumberColumn("Últ. Preço", format="R$ %.4f"),
+                                    "Custo PC": st.column_config.NumberColumn("Custo PC", format="R$ %.4f"),
+                                    "QTDE REAL": st.column_config.NumberColumn("QTDE REAL (XML)"),
+                                    "Saldo Pedido (PC)": st.column_config.NumberColumn("Saldo Disp. (PC)")
+                                },
+                                disabled=["Pedido Considerado", "Produto", "Produto (SB1)", "Avisos", "FATOR CONVERSÃO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"],
+                                use_container_width=True, hide_index=True
+                            )
+                            dfs_todas_edicoes.append((filial, nf, novo_ped_nf, df_ed))
+                            
+                            colA, colB = st.columns(2)
+                            with colA:
+                                btn_salvar = st.form_submit_button(f"💾 Salvar e Recalcular NF ({nf})", use_container_width=True)
+                            with colB:
+                                btn_fin = st.form_submit_button(f"📥 Finalizar Recebimento ({nf})", type="primary", use_container_width=True)
+
+                            if btn_salvar:
                                 df_recebimentos = aplicar_salvamento(df_recebimentos, [(filial, nf, novo_ped_nf, df_ed)], df_pc, df_cad, df_barras)
                                 salvar_recebimentos_nuvem(df_recebimentos)
                                 st.rerun()
-                        with colB:
-                            if st.button(f"📥 Finalizar Recebimento ({nf})", key=f"btn_fin_{filial}_{nf}", type="primary", use_container_width=True):
+                                
+                            if btn_fin:
                                 df_ed_fin = df_ed.copy()
                                 df_ed_fin['Finalizado'] = True
                                 df_recebimentos = aplicar_salvamento(df_recebimentos, [(filial, nf, novo_ped_nf, df_ed_fin)], df_pc, df_cad, df_barras)
@@ -645,12 +623,12 @@ if not df_recebimentos.empty:
             st.divider()
             colA_global, colB_global = st.columns(2)
             with colA_global:
-                if st.button("🔄 Salvar e Recalcular TODAS as Notas Acima", type="secondary", use_container_width=True):
+                if st.button("🔄 Salvar e Recalcular TODAS as Notas Acima (Apenas itens fora de formulário)", type="secondary", use_container_width=True):
                     df_recebimentos = aplicar_salvamento(df_recebimentos, dfs_todas_edicoes, df_pc, df_cad, df_barras)
                     salvar_recebimentos_nuvem(df_recebimentos)
                     st.rerun()
             with colB_global:
-                if st.button("📥 Finalizar TODAS as Notas Acima", type="primary", use_container_width=True):
+                if st.button("📥 Finalizar TODAS as Notas Acima (Apenas itens fora de formulário)", type="primary", use_container_width=True):
                     dfs_todas_edicoes_fin = []
                     for filial, nf, ped_nf, df_ed in dfs_todas_edicoes:
                         df_ed_fin = df_ed.copy()
