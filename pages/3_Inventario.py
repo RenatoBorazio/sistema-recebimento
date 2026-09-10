@@ -17,21 +17,27 @@ def obter_primeira_coluna(df, nomes_possiveis):
         if nome in df.columns: return nome
     return None
 
+def safe_numeric(series):
+    """Tradutor matemático: transforma números BR (1.234,50) para cálculo internacional (1234.50) sem quebrar"""
+    s = series.astype(str).str.strip()
+    s = s.apply(lambda x: x.replace('.', '').replace(',', '.') if ',' in x else x)
+    return pd.to_numeric(s, errors='coerce').fillna(0.0)
+
 # --- CARREGAR BASES DO COFRE BLINDADAS ---
 try:
     df_cad_raw = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
     if not df_cad_raw.empty:
         df_cad_raw.columns = [str(c).upper().strip() for c in df_cad_raw.columns]
         c_barras = obter_primeira_coluna(df_cad_raw, ['CÓDIGO DE BARRAS', 'COD BARRAS', 'EAN', 'CODIGO DE BARRAS', 'COD. BARRAS'])
-        c_int = obter_primeira_coluna(df_cad_raw, ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO INTERNO'])
-        c_desc = obter_primeira_coluna(df_cad_raw, ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME'])
+        c_int = obter_primeira_coluna(df_cad_raw, ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO INTERNO', 'B1_COD'])
+        c_desc = obter_primeira_coluna(df_cad_raw, ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME', 'B1_DESC'])
         c_custo_st = obter_primeira_coluna(df_cad_raw, ['CUSTO STAND', 'CUSTO STAND.', 'ULT. PRECO', 'ULTIMO PRECO', 'PRECO VENDA'])
         
         df_cad = pd.DataFrame()
         df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
         df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
         df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', '<NA>'], '').str.strip() if c_desc else ""
-        df_cad['CUSTO STAND'] = pd.to_numeric(df_cad_raw[c_custo_st], errors='coerce').fillna(0.0) if c_custo_st else 0.0
+        df_cad['CUSTO STAND'] = safe_numeric(df_cad_raw[c_custo_st]) if c_custo_st else 0.0
     else:
         df_cad = pd.DataFrame()
 except:
@@ -49,18 +55,25 @@ try:
     if not df_est_raw.empty:
         df_est_raw.columns = [str(c).upper().strip() for c in df_est_raw.columns]
         
-        c_filial = obter_primeira_coluna(df_est_raw, ['FILIAL'])
-        c_prod = obter_primeira_coluna(df_est_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO'])
-        c_arm = obter_primeira_coluna(df_est_raw, ['ARMAZEM', 'ARMAZÉM', 'LOCAL'])
-        c_saldo = obter_primeira_coluna(df_est_raw, ['SALDO INICIAL', 'SALDO', 'QTD INICIAL', 'QUANTIDADE', 'B2_QATU'])
-        c_custo = obter_primeira_coluna(df_est_raw, ['CUSTO UNITARIO', 'CUSTO UNITÁRIO', 'CUSTO', 'CM1', 'B2_CM1'])
+        # Dicionário Expansivo Protheus (SB2 e B7)
+        c_filial = obter_primeira_coluna(df_est_raw, ['FILIAL', 'B2_FILIAL', 'B7_FILIAL', 'COD FILIAL', 'CÓDIGO FILIAL'])
+        c_prod = obter_primeira_coluna(df_est_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'B2_COD', 'B7_COD', 'ITEM', 'COD. PRODUTO'])
+        c_arm = obter_primeira_coluna(df_est_raw, ['ARMAZEM', 'ARMAZÉM', 'LOCAL', 'B2_LOCAL', 'B7_LOCAL', 'DEPOSITO', 'DEPÓSITO'])
+        c_saldo = obter_primeira_coluna(df_est_raw, ['SALDO INICIAL', 'SALDO', 'QTD INICIAL', 'QUANTIDADE', 'B2_QATU', 'B7_QUANT', 'QTD', 'SALDO ATUAL', 'ESTOQUE'])
+        c_custo = obter_primeira_coluna(df_est_raw, ['CUSTO UNITARIO', 'CUSTO UNITÁRIO', 'CUSTO', 'CM1', 'B2_CM1', 'CUSTO MEDIO', 'CUSTO MÉDIO', 'VALOR UNITARIO', 'VALOR UNITÁRIO'])
         
+        # O AVISO DE DIAGNÓSTICO
+        if not c_saldo or not c_prod:
+            st.warning("⚠️ **Aviso de Diagnóstico:** O sistema carregou o seu arquivo de Estoque Inicial, mas não identificou as colunas de **Produto** ou **Saldo**. O cálculo pode dar Zero. Por favor, abra o seu Excel de estoque, renomeie os títulos das colunas para 'PRODUTO' e 'SALDO', e suba novamente na Central de Bases.")
+
         df_est = pd.DataFrame()
         df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
         df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
         df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
-        df_est['Saldo Inicial'] = pd.to_numeric(df_est_raw[c_saldo], errors='coerce').fillna(0.0) if c_saldo else 0.0
-        df_est['Custo Unitario'] = pd.to_numeric(df_est_raw[c_custo], errors='coerce').fillna(0.0) if c_custo else 0.0
+        
+        # Tradutor Matemático em Ação
+        df_est['Saldo Inicial'] = safe_numeric(df_est_raw[c_saldo]) if c_saldo else 0.0
+        df_est['Custo Unitario'] = safe_numeric(df_est_raw[c_custo]) if c_custo else 0.0
     else:
         df_est = pd.DataFrame()
 except:
@@ -71,8 +84,8 @@ try:
     if not df_sd1_raw.empty:
         df_sd1_raw.columns = [str(c).upper().strip() for c in df_sd1_raw.columns]
         
-        c_filial_sd1 = obter_primeira_coluna(df_sd1_raw, ['FILIAL'])
-        c_prod_sd1 = obter_primeira_coluna(df_sd1_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO'])
+        c_filial_sd1 = obter_primeira_coluna(df_sd1_raw, ['FILIAL', 'D1_FILIAL'])
+        c_prod_sd1 = obter_primeira_coluna(df_sd1_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'D1_COD'])
         
         df_sd1 = pd.DataFrame()
         df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
@@ -98,7 +111,6 @@ def carregar_historico():
     except:
         return pd.DataFrame()
 
-# O PULO DO GATO ESTÁ AQUI: Novo motor super flexível para aceitar "quantidade", "codigo", etc.
 def padronizar_colunas(df_bruto, nome_coluna_alvo):
     df = df_bruto.copy()
     colunas_upper = {str(c).upper().strip(): c for c in df.columns}
@@ -150,13 +162,17 @@ def processar_contagem(df_contagem):
         
         if not filial or not codigo_informado or codigo_informado.lower() in ['nan', 'none', '']: continue
             
-        contagem_1 = pd.to_numeric(row.get('CONTAGEM 1', 0), errors='coerce')
+        val_c1 = str(row.get('CONTAGEM 1', 0))
+        if ',' in val_c1: val_c1 = val_c1.replace('.', '').replace(',', '.')
+        contagem_1 = pd.to_numeric(val_c1, errors='coerce')
         if pd.isna(contagem_1): contagem_1 = 0.0
             
         val_c2 = row.get('CONTAGEM 2')
         is_recontado = False
         if pd.notna(val_c2) and str(val_c2).strip() != '':
-            contagem_2 = pd.to_numeric(val_c2, errors='coerce')
+            val_c2_str = str(val_c2)
+            if ',' in val_c2_str: val_c2_str = val_c2_str.replace('.', '').replace(',', '.')
+            contagem_2 = pd.to_numeric(val_c2_str, errors='coerce')
             if pd.isna(contagem_2): contagem_2 = 0.0
             contagem_final = contagem_2
             is_recontado = True
