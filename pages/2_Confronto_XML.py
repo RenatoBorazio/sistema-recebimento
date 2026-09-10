@@ -180,8 +180,9 @@ def processar_novos_xmls(xml_files, df_existente):
         vNF_node = infNFe.find('.//nfe:total/nfe:ICMSTot/nfe:vNF', namespaces)
         v_total_xml = float(vNF_node.text) if vNF_node is not None else 0.0
         
+        # O PULO DO GATO 1: Força o pedido global a ter EXATAMENTE 5 dígitos após derreter zeros à esquerda
         infCpl = infNFe.find('.//nfe:infAdic/nfe:infCpl', namespaces)
-        match = re.search(r'(?:pedido|ped)\b[^\d]*0*(\d{5,6})\b', infCpl.text if infCpl is not None else "", re.IGNORECASE)
+        match = re.search(r'(?:pedido|ped)\b[^\d]*0*(\d{5})\b', infCpl.text if infCpl is not None else "", re.IGNORECASE)
         pedido_global = match.group(1) if match else ""
         
         for i, det in enumerate(infNFe.findall('.//nfe:det', namespaces)):
@@ -202,8 +203,14 @@ def processar_novos_xmls(xml_files, df_existente):
                 if vDesc > 0 and qCom > 0:
                     vUnCom = vUnCom - (vDesc / qCom)
             
+            # O PULO DO GATO 2: Força o pedido do item a ter EXATAMENTE 5 dígitos
             xPed = prod.find('nfe:xPed', namespaces)
-            item_po = xPed.text if xPed is not None else ""
+            item_po_raw = xPed.text.strip() if xPed is not None and xPed.text else ""
+            item_po = ""
+            if item_po_raw:
+                po_num = re.sub(r'^0+', '', item_po_raw)
+                if po_num.isdigit() and len(po_num) == 5:
+                    item_po = po_num
             
             id_item = f"{nNF}_{ean_clean}_{i}_{qCom}_{vUnCom}" 
             
@@ -245,13 +252,11 @@ def recalcular_pendentes(df):
         cod_interno_manual = re.sub(r'\.0$', '', str(row.get('Código Interno', ''))).strip()
         cod_interno = cod_interno_manual.lstrip('0') if cod_interno_manual.lower() not in ['nan', 'none', ''] else ""
         
-        # 1. Busca Código Interno nas Barras Adicionais
         if not cod_interno and not df_barras.empty and ean_clean and 'EAN' in df_barras.columns:
             m_barra = df_barras[df_barras['EAN'].astype(str).str.lstrip('0') == ean_clean]
             if not m_barra.empty and 'CODIGO INTERNO' in m_barra.columns: 
                 cod_interno = str(m_barra['CODIGO INTERNO'].iloc[0]).strip().lstrip('0')
             
-        # 2. Busca Código Interno direto no SB1 pelo EAN
         if not cod_interno and not df_cad.empty and ean_clean and 'CÓDIGO DE BARRAS' in df_cad.columns:
             m_cad = df_cad[df_cad['CÓDIGO DE BARRAS'].astype(str).str.lstrip('0') == ean_clean]
             if not m_cad.empty and 'CÓDIGO INTERNO' in m_cad.columns: 
@@ -262,12 +267,16 @@ def recalcular_pendentes(df):
         item_po_xml = limpar_zeros_pedido(row.get('Pedido XML'))
         global_po_xml = limpar_zeros_pedido(row.get('Pedido Global XML'))
         
+        # O PULO DO GATO 3: Impede dados antigos do banco de poluir a tela se não tiverem 5 dígitos
+        if item_po_xml and len(item_po_xml) != 5: item_po_xml = ""
+        if global_po_xml and len(global_po_xml) != 5: global_po_xml = ""
+        
         final_po = "Sem Pedido"
         if ped_item: final_po = ped_item
         elif ped_nf: final_po = ped_nf
         elif item_po_xml in pc_pedidos_list: final_po = item_po_xml
         elif global_po_xml in pc_pedidos_list: final_po = global_po_xml
-        elif item_po_xml and len(item_po_xml)>=5: final_po = item_po_xml
+        elif item_po_xml: final_po = item_po_xml
         elif global_po_xml: final_po = global_po_xml
         
         status_list = []
@@ -316,7 +325,6 @@ def recalcular_pendentes(df):
         fator_ajustado = pd.to_numeric(row.get('FATOR AJUSTADO', 0), errors='coerce')
         fator_ativo = fator_cadastro if pd.isna(fator_ajustado) or fator_ajustado <= 0 else int(fator_ajustado)
         
-        # --- ESCUDO MATEMÁTICO ANTI-ZERO ---
         if fator_ativo <= 0: 
             fator_ativo = 1
             
@@ -755,7 +763,6 @@ if not df_recebimentos.empty:
                     df_prot = pd.read_excel(arquivo_prot)
                     header_idx = -1
                     
-                    # Usa uma união de strings para impedir que a Nuvem abrevie (trunque) as colunas
                     for i, r in df_prot.head(50).iterrows():
                         row_str = " ".join([str(val).lower() for val in r.values])
                         if "produto" in row_str and "quantidade" in row_str and "documento" in row_str:
