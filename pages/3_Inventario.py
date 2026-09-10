@@ -55,14 +55,12 @@ try:
     if not df_est_raw.empty:
         df_est_raw.columns = [str(c).upper().strip() for c in df_est_raw.columns]
         
-        # Dicionário Expansivo Protheus (SB2 e B7)
         c_filial = obter_primeira_coluna(df_est_raw, ['FILIAL', 'B2_FILIAL', 'B7_FILIAL', 'COD FILIAL', 'CÓDIGO FILIAL'])
         c_prod = obter_primeira_coluna(df_est_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'B2_COD', 'B7_COD', 'ITEM', 'COD. PRODUTO'])
         c_arm = obter_primeira_coluna(df_est_raw, ['ARMAZEM', 'ARMAZÉM', 'LOCAL', 'B2_LOCAL', 'B7_LOCAL', 'DEPOSITO', 'DEPÓSITO'])
         c_saldo = obter_primeira_coluna(df_est_raw, ['SALDO INICIAL', 'SALDO', 'QTD INICIAL', 'QUANTIDADE', 'B2_QATU', 'B7_QUANT', 'QTD', 'SALDO ATUAL', 'ESTOQUE'])
         c_custo = obter_primeira_coluna(df_est_raw, ['CUSTO UNITARIO', 'CUSTO UNITÁRIO', 'CUSTO', 'CM1', 'B2_CM1', 'CUSTO MEDIO', 'CUSTO MÉDIO', 'VALOR UNITARIO', 'VALOR UNITÁRIO'])
         
-        # O AVISO DE DIAGNÓSTICO
         if not c_saldo or not c_prod:
             st.warning("⚠️ **Aviso de Diagnóstico:** O sistema carregou o seu arquivo de Estoque Inicial, mas não identificou as colunas de **Produto** ou **Saldo**. O cálculo pode dar Zero. Por favor, abra o seu Excel de estoque, renomeie os títulos das colunas para 'PRODUTO' e 'SALDO', e suba novamente na Central de Bases.")
 
@@ -70,8 +68,6 @@ try:
         df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
         df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
         df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
-        
-        # Tradutor Matemático em Ação
         df_est['Saldo Inicial'] = safe_numeric(df_est_raw[c_saldo]) if c_saldo else 0.0
         df_est['Custo Unitario'] = safe_numeric(df_est_raw[c_custo]) if c_custo else 0.0
     else:
@@ -438,90 +434,115 @@ with aba2:
         df_filtro = df_hist[(df_hist['PERIODO'].astype(str) == str(per_selecionado)) & (df_hist['DISPONIVEL PARA INVENTARIO?'].astype(str) == 'SIM')].copy()
         
         if not df_filtro.empty:
-            resumo_gerencial = []
-            
-            cols_calc = ['VALOR INICIAL', 'SALDO INICIAL', 'DIVERGENCIA DE SALDO', 'DIVERGENCIA DE VALOR', 'CONTAGEM FINAL']
-            for c in cols_calc:
-                if c in df_filtro.columns:
-                    df_filtro[c] = pd.to_numeric(df_filtro[c], errors='coerce').fillna(0)
-                else:
-                    df_filtro[c] = 0.0
-
-            if "Consolidada" in visao:
-                for filial, group in df_filtro.groupby('FILIAL'):
-                    resumo_gerencial.append({
-                        "PERÍODO": per_selecionado,
-                        "RESULTADOS INVENTÁRIO": filial,
-                        "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
-                        "QTD. INICIAL": group['SALDO INICIAL'].sum(),
-                        "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                        "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
-                        "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
-                    })
-                    
-                df_detalhe = df_filtro.groupby(['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO'], as_index=False).agg({
-                    'SALDO INICIAL': 'sum',
-                    'CONTAGEM FINAL': 'sum',
-                    'DIVERGENCIA DE SALDO': 'sum',
-                    'VALOR INICIAL': 'sum',
-                    'DIVERGENCIA DE VALOR': 'sum'
-                })
-            else:
-                for (data, filial), group in df_filtro.groupby(['DATA', 'FILIAL']):
+            # ---> INÍCIO DO NOVO FILTRO DINÂMICO DE DATAS <---
+            if "Detalhada" in visao:
+                datas_unicas = sorted(df_filtro['DATA'].astype(str).unique())
+                
+                def formatar_data_br(d_str):
                     try:
-                        data_formatada = datetime.datetime.strptime(str(data), '%Y-%m-%d').strftime('%d/%m/%Y')
+                        return datetime.datetime.strptime(d_str, '%Y-%m-%d').strftime('%d/%m/%Y')
                     except:
-                        data_formatada = str(data)
+                        return d_str
                         
-                    resumo_gerencial.append({
-                        "DATA DA CONTAGEM": data_formatada,
-                        "RESULTADOS INVENTÁRIO": filial,
-                        "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
-                        "QTD. INICIAL": group['SALDO INICIAL'].sum(),
-                        "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                        "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
-                        "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
-                    })
-                    
-                df_detalhe = df_filtro[['DATA', 'FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO', 'SALDO INICIAL', 'CONTAGEM FINAL', 'DIVERGENCIA DE SALDO', 'VALOR INICIAL', 'DIVERGENCIA DE VALOR']].copy()
-            
-            st.markdown("### 📋 Resumo Agregado")
-            df_resumo_gerencial = pd.DataFrame(resumo_gerencial)
-            st.dataframe(df_resumo_gerencial, use_container_width=True, hide_index=True)
-            
-            st.markdown("---")
-            st.markdown("### 🚨 Indicadores de Maior Impacto (Top 5)")
-            
-            df_detalhe['ABS_DIV_VALOR'] = df_detalhe['DIVERGENCIA DE VALOR'].abs()
-            df_detalhe['ABS_DIV_SALDO'] = df_detalhe['DIVERGENCIA DE SALDO'].abs()
-            
-            col_t1, col_t2 = st.columns(2)
-            with col_t1:
-                st.markdown("#### Maiores Variações de Valor (R$)")
-                top5_valor = df_detalhe.sort_values(by='ABS_DIV_VALOR', ascending=False).head(5)
-                view_top5_valor = top5_valor[['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO', 'DIVERGENCIA DE VALOR']].copy()
-                view_top5_valor['DIVERGENCIA DE VALOR'] = view_top5_valor['DIVERGENCIA DE VALOR'].apply(lambda x: f"R$ {x:,.2f}")
-                st.dataframe(view_top5_valor, use_container_width=True, hide_index=True)
+                mapa_datas = {d: formatar_data_br(d) for d in datas_unicas}
                 
-            with col_t2:
-                st.markdown("#### Maiores Variações de Quantidade")
-                top5_saldo = df_detalhe.sort_values(by='ABS_DIV_SALDO', ascending=False).head(5)
-                view_top5_saldo = top5_saldo[['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO', 'DIVERGENCIA DE SALDO']].copy()
-                st.dataframe(view_top5_saldo, use_container_width=True, hide_index=True)
+                datas_selecionadas = st.multiselect(
+                    "📅 Filtrar por Data(s) Específica(s):",
+                    options=datas_unicas,
+                    default=datas_unicas,
+                    format_func=lambda x: mapa_datas[x]
+                )
                 
-            st.markdown("---")
-            st.markdown("### 📦 Detalhamento por Produto")
-            df_detalhe_view = df_detalhe.drop(columns=['ABS_DIV_VALOR', 'ABS_DIV_SALDO'])
-            st.dataframe(df_detalhe_view, use_container_width=True, hide_index=True)
-            
-            st.divider()
-            output_gerencial = io.BytesIO()
-            with pd.ExcelWriter(output_gerencial, engine='openpyxl') as writer:
-                df_resumo_gerencial.to_excel(writer, sheet_name="Resultados_Gerenciais", index=False)
-                df_detalhe_view.to_excel(writer, sheet_name="Detalhamento_por_Produto", index=False)
-                df_filtro.to_excel(writer, sheet_name="Base_Analitica_Oficial", index=False)
-            st.download_button("📥 Baixar Relatório Gerencial Completo (Excel)", data=output_gerencial.getvalue(), file_name=f"Fechamento_Inventario_{per_selecionado}.xlsx", type="primary")
+                df_filtro = df_filtro[df_filtro['DATA'].astype(str).isin(datas_selecionadas)]
+                st.markdown("---")
+            # ---> FIM DO FILTRO DINÂMICO <---
 
+            if not df_filtro.empty:
+                resumo_gerencial = []
+                
+                cols_calc = ['VALOR INICIAL', 'SALDO INICIAL', 'DIVERGENCIA DE SALDO', 'DIVERGENCIA DE VALOR', 'CONTAGEM FINAL']
+                for c in cols_calc:
+                    if c in df_filtro.columns:
+                        df_filtro[c] = pd.to_numeric(df_filtro[c], errors='coerce').fillna(0)
+                    else:
+                        df_filtro[c] = 0.0
+
+                if "Consolidada" in visao:
+                    for filial, group in df_filtro.groupby('FILIAL'):
+                        resumo_gerencial.append({
+                            "PERÍODO": per_selecionado,
+                            "RESULTADOS INVENTÁRIO": filial,
+                            "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
+                            "QTD. INICIAL": group['SALDO INICIAL'].sum(),
+                            "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
+                            "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
+                        })
+                        
+                    df_detalhe = df_filtro.groupby(['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO'], as_index=False).agg({
+                        'SALDO INICIAL': 'sum',
+                        'CONTAGEM FINAL': 'sum',
+                        'DIVERGENCIA DE SALDO': 'sum',
+                        'VALOR INICIAL': 'sum',
+                        'DIVERGENCIA DE VALOR': 'sum'
+                    })
+                else:
+                    for (data, filial), group in df_filtro.groupby(['DATA', 'FILIAL']):
+                        try:
+                            data_formatada = datetime.datetime.strptime(str(data), '%Y-%m-%d').strftime('%d/%m/%Y')
+                        except:
+                            data_formatada = str(data)
+                            
+                        resumo_gerencial.append({
+                            "DATA DA CONTAGEM": data_formatada,
+                            "RESULTADOS INVENTÁRIO": filial,
+                            "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
+                            "QTD. INICIAL": group['SALDO INICIAL'].sum(),
+                            "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
+                            "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
+                        })
+                        
+                    df_detalhe = df_filtro[['DATA', 'FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO', 'SALDO INICIAL', 'CONTAGEM FINAL', 'DIVERGENCIA DE SALDO', 'VALOR INICIAL', 'DIVERGENCIA DE VALOR']].copy()
+                
+                st.markdown("### 📋 Resumo Agregado")
+                df_resumo_gerencial = pd.DataFrame(resumo_gerencial)
+                st.dataframe(df_resumo_gerencial, use_container_width=True, hide_index=True)
+                
+                st.markdown("---")
+                st.markdown("### 🚨 Indicadores de Maior Impacto (Top 5)")
+                
+                df_detalhe['ABS_DIV_VALOR'] = df_detalhe['DIVERGENCIA DE VALOR'].abs()
+                df_detalhe['ABS_DIV_SALDO'] = df_detalhe['DIVERGENCIA DE SALDO'].abs()
+                
+                col_t1, col_t2 = st.columns(2)
+                with col_t1:
+                    st.markdown("#### Maiores Variações de Valor (R$)")
+                    top5_valor = df_detalhe.sort_values(by='ABS_DIV_VALOR', ascending=False).head(5)
+                    view_top5_valor = top5_valor[['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO', 'DIVERGENCIA DE VALOR']].copy()
+                    view_top5_valor['DIVERGENCIA DE VALOR'] = view_top5_valor['DIVERGENCIA DE VALOR'].apply(lambda x: f"R$ {x:,.2f}")
+                    st.dataframe(view_top5_valor, use_container_width=True, hide_index=True)
+                    
+                with col_t2:
+                    st.markdown("#### Maiores Variações de Quantidade")
+                    top5_saldo = df_detalhe.sort_values(by='ABS_DIV_SALDO', ascending=False).head(5)
+                    view_top5_saldo = top5_saldo[['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO', 'DIVERGENCIA DE SALDO']].copy()
+                    st.dataframe(view_top5_saldo, use_container_width=True, hide_index=True)
+                    
+                st.markdown("---")
+                st.markdown("### 📦 Detalhamento por Produto")
+                df_detalhe_view = df_detalhe.drop(columns=['ABS_DIV_VALOR', 'ABS_DIV_SALDO'])
+                st.dataframe(df_detalhe_view, use_container_width=True, hide_index=True)
+                
+                st.divider()
+                output_gerencial = io.BytesIO()
+                with pd.ExcelWriter(output_gerencial, engine='openpyxl') as writer:
+                    df_resumo_gerencial.to_excel(writer, sheet_name="Resultados_Gerenciais", index=False)
+                    df_detalhe_view.to_excel(writer, sheet_name="Detalhamento_por_Produto", index=False)
+                    df_filtro.to_excel(writer, sheet_name="Base_Analitica_Oficial", index=False)
+                st.download_button("📥 Baixar Relatório Gerencial Completo (Excel)", data=output_gerencial.getvalue(), file_name=f"Fechamento_Inventario_{per_selecionado}.xlsx", type="primary")
+            else:
+                st.warning("⚠️ Nenhuma data selecionada. Por favor, selecione pelo menos uma data no filtro acima para visualizar os dados.")
         else:
             st.info(f"Nenhum dado válido gravado para o período {per_selecionado}.")
     else:
