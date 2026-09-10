@@ -12,26 +12,74 @@ st.markdown("Cruze Contagens, Apure Divergências e Gerencie os Resultados Conso
 # --- CONEXÃO COM O BANCO DE DADOS NA NUVEM ---
 conn = st.connection("supabase", type="sql")
 
-# --- CARREGAR BASES DO COFRE ---
-# Utilizamos ttl=0 para garantir que o sistema sempre puxe a versão mais recente do banco,
-# sem usar cache antigo se outra pessoa acabou de atualizar a Central de Bases.
+def obter_primeira_coluna(df, nomes_possiveis):
+    for nome in nomes_possiveis:
+        if nome in df.columns: return nome
+    return None
+
+# --- CARREGAR BASES DO COFRE BLINDADAS ---
+# Utilizamos ttl=0 para garantir que o sistema sempre puxe a versão mais recente do banco
 try:
-    df_cad = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
+    df_cad_raw = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
+    if not df_cad_raw.empty:
+        df_cad_raw.columns = [str(c).upper().strip() for c in df_cad_raw.columns]
+        c_barras = obter_primeira_coluna(df_cad_raw, ['CÓDIGO DE BARRAS', 'COD BARRAS', 'EAN', 'CODIGO DE BARRAS', 'COD. BARRAS'])
+        c_int = obter_primeira_coluna(df_cad_raw, ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO INTERNO'])
+        c_desc = obter_primeira_coluna(df_cad_raw, ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME'])
+        c_custo_st = obter_primeira_coluna(df_cad_raw, ['CUSTO STAND', 'CUSTO STAND.', 'ULT. PRECO', 'ULTIMO PRECO', 'PRECO VENDA'])
+        
+        df_cad = pd.DataFrame()
+        df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
+        df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
+        df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', '<NA>'], '').str.strip() if c_desc else ""
+        df_cad['CUSTO STAND'] = pd.to_numeric(df_cad_raw[c_custo_st], errors='coerce').fillna(0.0) if c_custo_st else 0.0
+    else:
+        df_cad = pd.DataFrame()
 except:
     df_cad = pd.DataFrame()
 
 try:
     df_barras = conn.query("SELECT * FROM barras_adicionais", ttl=0).astype(str)
+    if not df_barras.empty:
+        if 'EAN' in df_barras.columns: df_barras['EAN'] = df_barras['EAN'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
 except:
     df_barras = pd.DataFrame()
 
 try:
-    df_est = conn.query("SELECT * FROM estoque_inicial", ttl=0).astype(str)
+    df_est_raw = conn.query("SELECT * FROM estoque_inicial", ttl=0).astype(str)
+    if not df_est_raw.empty:
+        df_est_raw.columns = [str(c).upper().strip() for c in df_est_raw.columns]
+        
+        c_filial = obter_primeira_coluna(df_est_raw, ['FILIAL'])
+        c_prod = obter_primeira_coluna(df_est_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO'])
+        c_arm = obter_primeira_coluna(df_est_raw, ['ARMAZEM', 'ARMAZÉM', 'LOCAL'])
+        c_saldo = obter_primeira_coluna(df_est_raw, ['SALDO INICIAL', 'SALDO', 'QTD INICIAL', 'QUANTIDADE', 'B2_QATU'])
+        c_custo = obter_primeira_coluna(df_est_raw, ['CUSTO UNITARIO', 'CUSTO UNITÁRIO', 'CUSTO', 'CM1', 'B2_CM1'])
+        
+        df_est = pd.DataFrame()
+        df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
+        df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
+        df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
+        df_est['Saldo Inicial'] = pd.to_numeric(df_est_raw[c_saldo], errors='coerce').fillna(0.0) if c_saldo else 0.0
+        df_est['Custo Unitario'] = pd.to_numeric(df_est_raw[c_custo], errors='coerce').fillna(0.0) if c_custo else 0.0
+    else:
+        df_est = pd.DataFrame()
 except:
     df_est = pd.DataFrame()
 
 try:
-    df_sd1 = conn.query("SELECT * FROM sd1_pendente", ttl=0).astype(str)
+    df_sd1_raw = conn.query("SELECT * FROM sd1_pendente", ttl=0).astype(str)
+    if not df_sd1_raw.empty:
+        df_sd1_raw.columns = [str(c).upper().strip() for c in df_sd1_raw.columns]
+        
+        c_filial_sd1 = obter_primeira_coluna(df_sd1_raw, ['FILIAL'])
+        c_prod_sd1 = obter_primeira_coluna(df_sd1_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO'])
+        
+        df_sd1 = pd.DataFrame()
+        df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
+        df_sd1['Produto'] = df_sd1_raw[c_prod_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod_sd1 else ""
+    else:
+        df_sd1 = pd.DataFrame()
 except:
     df_sd1 = pd.DataFrame()
 
@@ -44,9 +92,6 @@ def checar_bases():
 if checar_bases():
     st.warning(f"⚠️ Cofre incompleto para Inventário. Vá na Central de Bases e sincronize: {', '.join(checar_bases())}")
     st.stop()
-
-df_est['Saldo Inicial'] = pd.to_numeric(df_est['Saldo Inicial'], errors='coerce').fillna(0.0)
-df_est['Custo Unitario'] = pd.to_numeric(df_est['Custo Unitario'], errors='coerce').fillna(0.0)
 
 def carregar_historico():
     try:
