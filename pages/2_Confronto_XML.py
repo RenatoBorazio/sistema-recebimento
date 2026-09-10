@@ -245,13 +245,11 @@ def recalcular_pendentes(df):
         cod_interno_manual = re.sub(r'\.0$', '', str(row.get('Código Interno', ''))).strip()
         cod_interno = cod_interno_manual.lstrip('0') if cod_interno_manual.lower() not in ['nan', 'none', ''] else ""
         
-        # 1. Busca Código Interno nas Barras Adicionais
         if not cod_interno and not df_barras.empty and ean_clean and 'EAN' in df_barras.columns:
             m_barra = df_barras[df_barras['EAN'].astype(str).str.lstrip('0') == ean_clean]
             if not m_barra.empty and 'CODIGO INTERNO' in m_barra.columns: 
                 cod_interno = str(m_barra['CODIGO INTERNO'].iloc[0]).strip().lstrip('0')
             
-        # 2. Busca Código Interno direto no SB1 pelo EAN
         if not cod_interno and not df_cad.empty and ean_clean and 'CÓDIGO DE BARRAS' in df_cad.columns:
             m_cad = df_cad[df_cad['CÓDIGO DE BARRAS'].astype(str).str.lstrip('0') == ean_clean]
             if not m_cad.empty and 'CÓDIGO INTERNO' in m_cad.columns: 
@@ -275,7 +273,6 @@ def recalcular_pendentes(df):
         saldo_pc, custo_pc = 0.0, 0.0
         match_pc = pd.DataFrame()
         
-        # 3. Cruzamento com a Base de Pedidos (PC)
         if final_po != "Sem Pedido":
             if ean_clean:
                 match_pc = df_pc[(df_pc['Numero PC'].astype(str) == final_po) & (df_pc['Cod Barras'].astype(str).str.lstrip('0') == ean_clean)]
@@ -293,7 +290,6 @@ def recalcular_pendentes(df):
         else: 
             status_list.append("Sem Pedido")
 
-        # 4. Cruzamento FINAL com o Cadastro (SB1)
         match_cad = pd.DataFrame()
         fator_cadastro = 1
         ult_preco = 0.0
@@ -317,6 +313,10 @@ def recalcular_pendentes(df):
             
         fator_ajustado = pd.to_numeric(row.get('FATOR AJUSTADO', 0), errors='coerce')
         fator_ativo = fator_cadastro if pd.isna(fator_ajustado) or fator_ajustado <= 0 else int(fator_ajustado)
+        
+        # --- ESCUDO MATEMÁTICO ANTI-ZERO ---
+        if fator_ativo <= 0: 
+            fator_ativo = 1
             
         qtde_real = qCom * fator_ativo
         custo_unit_real = vUnCom / fator_ativo
@@ -385,6 +385,10 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                 if not match_cad.empty: fator_cadastro = int(match_cad['FATOR'].iloc[0]) if 'FATOR' in match_cad.columns else 1
                 fator_ajustado = pd.to_numeric(row.get('FATOR AJUSTADO', 0), errors='coerce')
                 fator_ativo = fator_cadastro if pd.isna(fator_ajustado) or fator_ajustado <= 0 else int(fator_ajustado)
+                
+                # --- ESCUDO MATEMÁTICO ANTI-ZERO ---
+                if fator_ativo <= 0: 
+                    fator_ativo = 1
                 
                 qtde_raw_restante = qtde_xml_raw_total
                 linhas_split = []
