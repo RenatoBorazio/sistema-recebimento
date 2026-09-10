@@ -245,11 +245,13 @@ def recalcular_pendentes(df):
         cod_interno_manual = re.sub(r'\.0$', '', str(row.get('Código Interno', ''))).strip()
         cod_interno = cod_interno_manual.lstrip('0') if cod_interno_manual.lower() not in ['nan', 'none', ''] else ""
         
+        # 1. Busca Código Interno nas Barras Adicionais
         if not cod_interno and not df_barras.empty and ean_clean and 'EAN' in df_barras.columns:
             m_barra = df_barras[df_barras['EAN'].astype(str).str.lstrip('0') == ean_clean]
             if not m_barra.empty and 'CODIGO INTERNO' in m_barra.columns: 
                 cod_interno = str(m_barra['CODIGO INTERNO'].iloc[0]).strip().lstrip('0')
             
+        # 2. Busca Código Interno direto no SB1 pelo EAN
         if not cod_interno and not df_cad.empty and ean_clean and 'CÓDIGO DE BARRAS' in df_cad.columns:
             m_cad = df_cad[df_cad['CÓDIGO DE BARRAS'].astype(str).str.lstrip('0') == ean_clean]
             if not m_cad.empty and 'CÓDIGO INTERNO' in m_cad.columns: 
@@ -386,7 +388,6 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                 fator_ajustado = pd.to_numeric(row.get('FATOR AJUSTADO', 0), errors='coerce')
                 fator_ativo = fator_cadastro if pd.isna(fator_ajustado) or fator_ajustado <= 0 else int(fator_ajustado)
                 
-                # --- ESCUDO MATEMÁTICO ANTI-ZERO ---
                 if fator_ativo <= 0: 
                     fator_ativo = 1
                 
@@ -760,11 +761,13 @@ if not df_recebimentos.empty:
                             break
                             
                     if header_idx != -1:
-                        df_prot = pd.read_excel(arquivo_prot, header=header_idx+1)
+                        df_prot.columns = df_prot.iloc[header_idx]
+                        df_prot = df_prot.iloc[header_idx+1:].reset_index(drop=True)
+                        df_prot = df_prot.loc[:, df_prot.columns.notna()]
                         
-                        col_doc = obter_primeira_coluna(df_prot, [c for c in df_prot.columns if 'doc' in str(c).lower() and 'orig' not in str(c).lower()])
-                        col_prod = obter_primeira_coluna(df_prot, [c for c in df_prot.columns if 'prod' in str(c).lower()])
-                        col_qtde = obter_primeira_coluna(df_prot, [c for c in df_prot.columns if 'quan' in str(c).lower()])
+                        col_doc = next((c for c in df_prot.columns if 'doc' in str(c).lower() and 'orig' not in str(c).lower()), None)
+                        col_prod = next((c for c in df_prot.columns if 'prod' in str(c).lower()), None)
+                        col_qtde = next((c for c in df_prot.columns if 'quan' in str(c).lower()), None)
                         
                         if col_doc and col_prod and col_qtde:
                             df_prot[col_doc] = df_prot[col_doc].astype(str).str.replace(r'\.0$', '', regex=True)
