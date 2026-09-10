@@ -646,86 +646,76 @@ with aba3:
                 
                 tipo_mov_vol = "uma redução" if div_saldo < 0 else "um aumento"
                 
-                html = f"<h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;'>{titulo}</h4>"
-                html += "<ul style='margin-top: 5px; margin-bottom: 15px;'>"
-                html += f"<li>Dos <b>{skus_totais}</b> SKUs inventariados, <b>{skus_div}</b> apresentaram divergências, representando aproximadamente <b>{perc_skus_div:.0f}%</b> da lista.</li>"
+                # HTML Montado de forma limpa (sem indentação fantasma)
+                h = f"<h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;'>{titulo}</h4>\n"
+                h += "<ul style='margin-top: 5px; margin-bottom: 15px;'>\n"
+                h += f"<li>Dos <b>{skus_totais}</b> SKUs inventariados, <b>{skus_div}</b> apresentaram divergências, representando aproximadamente <b>{perc_skus_div:.0f}%</b> da lista.</li>\n"
                 
                 if round(div_valor, 2) != 0:
-                    html += f"<li>Foi identificada {tipo_mov_valor} de inventário no valor de <b>R$ {fmt_br(abs(div_valor), True)}</b>, {tipo_mov_estoque} o estoque de R$ {fmt_br(valor_inicial, True)} para R$ {fmt_br(valor_final, True)}, o que representa uma {tipo_baixa_alta} de <b>{perc_div_valor:.0f}%</b>.</li>"
+                    h += f"<li>Foi identificada {tipo_mov_valor} de inventário no valor de <b>R$ {fmt_br(abs(div_valor), True)}</b>, {tipo_mov_estoque} o estoque de R$ {fmt_br(valor_inicial, True)} para R$ {fmt_br(valor_final, True)}, o que representa uma {tipo_baixa_alta} de <b>{perc_div_valor:.0f}%</b>.</li>\n"
                 else:
-                    html += f"<li>O valor do estoque se manteve em R$ {fmt_br(valor_inicial, True)}, sem perdas ou ganhos financeiros.</li>"
+                    h += f"<li>O valor do estoque se manteve em R$ {fmt_br(valor_inicial, True)}, sem perdas ou ganhos financeiros.</li>\n"
                     
                 if round(div_saldo, 0) != 0:
-                    html += f"<li>Em volume, houve {tipo_mov_vol} de <b>{fmt_br(abs(div_saldo))}</b> unidades, fazendo o estoque passar de {fmt_br(saldo_inicial)} para {fmt_br(saldo_final)} unidades.</li>"
+                    h += f"<li>Em volume, houve {tipo_mov_vol} de <b>{fmt_br(abs(div_saldo))}</b> unidades, fazendo o estoque passar de {fmt_br(saldo_inicial)} para {fmt_br(saldo_final)} unidades.</li>\n"
                 else:
-                    html += f"<li>Em volume, o estoque geral de {fmt_br(saldo_inicial)} unidades foi mantido.</li>"
+                    h += f"<li>Em volume, o estoque geral de {fmt_br(saldo_inicial)} unidades foi mantido.</li>\n"
                     
-                html += "</ul>"
-                return html
+                h += "</ul>\n"
+                return h
 
             indicadores_html = ""
             if not df_email.empty:
-                indicadores_html += "<div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #2e7bcf; margin: 20px 0;'>"
-                indicadores_html += "<h3 style='color: #2e7bcf; margin-bottom: 10px; margin-top: 0;'>📊 Resumo de Indicadores da Semana</h3>"
-                
+                indicadores_html += "<div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #2e7bcf; margin: 20px 0;'>\n"
+                indicadores_html += "<h3 style='color: #2e7bcf; margin-bottom: 10px; margin-top: 0;'>📊 Resumo de Indicadores da Semana</h3>\n"
                 indicadores_html += gerar_texto_indicadores(df_email, "Consolidado Geral (Todas as Filiais)")
-                
                 for f_code in filiais_unicas:
                     df_fil = df_email[df_email['FILIAL'] == f_code]
                     if not df_fil.empty:
                         nome_filial = filiais_map.get(f_code, f"FILIAL {f_code}")
                         indicadores_html += gerar_texto_indicadores(df_fil, f"Resultado: {nome_filial}")
-                        
-                indicadores_html += "</div>"
-            # ------------------------------------------------
+                indicadores_html += "</div>\n"
             
-            html_cal = f"""
-            <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 15px; border: 2px dashed #999; border-radius: 5px;">
-                <p>Boa tarde!</p>
-                <p>Segue o resumo <span style="background-color: #ffff00; font-weight: bold;">semanal</span> dos inventários.</p>
-                <p><b>Em anexo, seguem todos os itens ajustados da semana.</b></p>
-                <p>Os ajustes são realizados após o envio da recontagem. Conforme alinhado, caso a contagem ou a recontagem não seja realizada, solicitamos o envio da justificativa correspondente.</p>
-                
-                {indicadores_html}
-                
-                <p>Calendário de contagens e recontagens por filial:</p>
-                <table style="border-collapse: collapse; text-align: center; margin-top: 15px;">
-                    <tr><th style="border: none;"></th>
-            """
+            # --- CONSTRUÇÃO DO HTML FINAL SEM INDENTAÇÃO ---
+            html_cal = '<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 15px; border: 2px dashed #999; border-radius: 5px;">\n'
+            html_cal += '<p>Boa tarde!</p>\n'
+            html_cal += '<p>Segue o resumo <span style="background-color: #ffff00; font-weight: bold;">semanal</span> dos inventários.</p>\n'
+            html_cal += '<p><b>Em anexo, seguem todos os itens ajustados da semana.</b></p>\n'
+            html_cal += '<p>Os ajustes são realizados após o envio da recontagem. Conforme alinhado, caso a contagem ou a recontagem não seja realizada, solicitamos o envio da justificativa correspondente.</p>\n'
+            html_cal += indicadores_html
+            html_cal += '<p>Calendário de contagens e recontagens por filial:</p>\n'
+            html_cal += '<table style="border-collapse: collapse; text-align: center; margin-top: 15px;">\n'
+            html_cal += '<tr><th style="border: none;"></th>\n'
+            
             for d in dates:
-                html_cal += f'<th colspan="2" style="border: 1px solid #ccc; padding: 8px 15px; background-color: #f2f2f2; font-size: 16px;">{d.day}</th>'
+                html_cal += f'<th colspan="2" style="border: 1px solid #ccc; padding: 8px 15px; background-color: #f2f2f2; font-size: 16px;">{d.day}</th>\n'
             html_cal += '</tr>\n'
             
             for idx, row in df_grid.iterrows():
                 f_name = row['Filial']
-                html_cal += f'<tr><td style="border: none; padding: 10px 15px; text-align: right; font-weight: bold; color: #555;">{f_name}</td>'
-                
+                html_cal += f'<tr><td style="border: none; padding: 10px 15px; text-align: right; font-weight: bold; color: #555;">{f_name}</td>\n'
                 for d in dates:
                     d_label = d.strftime('%d/%m')
                     status = row[d_label]
-                    
                     if status == "OK":
                         cor_bg, cor_texto = '#a9d08e', '#333'
                     elif status == "FALTOU":
                         cor_bg, cor_texto = '#f4b084', '#333'
                     else:
                         cor_bg, cor_texto = '#ffffff', '#999'
-                        
-                    html_cal += f'<td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;">contagem</td>'
-                    html_cal += f'<td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;">recontagem</td>'
-                    
+                    html_cal += f'<td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;">contagem</td>\n'
+                    html_cal += f'<td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;">recontagem</td>\n'
                 html_cal += '</tr>\n'
                 
-            html_cal += '</table><br>'
-            html_cal += """
-                <table style="border-collapse: collapse; text-align: center; font-family: Arial, sans-serif; font-size: 12px; font-weight: bold;">
-                    <tr><td style="border: 1px solid #000; padding: 3px 20px;">LEGENDA</td></tr>
-                    <tr><td style="border: 1px solid #000; padding: 3px 20px; background-color: #f4b084;">NÃO INVENTARIADO</td></tr>
-                    <tr><td style="border: 1px solid #000; padding: 3px 20px; background-color: #a9d08e;">INVENTARIADO - OK</td></tr>
-                </table>
-                <p>Atenciosamente.</p>
-            </div>
-            """
+            html_cal += '</table><br>\n'
+            html_cal += '<table style="border-collapse: collapse; text-align: center; font-family: Arial, sans-serif; font-size: 12px; font-weight: bold;">\n'
+            html_cal += '<tr><td style="border: 1px solid #000; padding: 3px 20px;">LEGENDA</td></tr>\n'
+            html_cal += '<tr><td style="border: 1px solid #000; padding: 3px 20px; background-color: #f4b084;">NÃO INVENTARIADO</td></tr>\n'
+            html_cal += '<tr><td style="border: 1px solid #000; padding: 3px 20px; background-color: #a9d08e;">INVENTARIADO - OK</td></tr>\n'
+            html_cal += '</table>\n'
+            html_cal += '<p>Atenciosamente.</p>\n'
+            html_cal += '</div>\n'
+            
             st.markdown(html_cal, unsafe_allow_html=True)
     else:
         st.info("O Histórico de Inventário está vazio. Salve algumas apurações diárias para poder gerar o reporte semanal.")
