@@ -434,7 +434,6 @@ with aba2:
         df_filtro = df_hist[(df_hist['PERIODO'].astype(str) == str(per_selecionado)) & (df_hist['DISPONIVEL PARA INVENTARIO?'].astype(str) == 'SIM')].copy()
         
         if not df_filtro.empty:
-            # ---> INÍCIO DO NOVO FILTRO DINÂMICO DE DATAS <---
             if "Detalhada" in visao:
                 datas_unicas = sorted(df_filtro['DATA'].astype(str).unique())
                 
@@ -455,7 +454,6 @@ with aba2:
                 
                 df_filtro = df_filtro[df_filtro['DATA'].astype(str).isin(datas_selecionadas)]
                 st.markdown("---")
-            # ---> FIM DO FILTRO DINÂMICO <---
 
             if not df_filtro.empty:
                 resumo_gerencial = []
@@ -613,15 +611,83 @@ with aba3:
             st.dataframe(df_grid, hide_index=True, use_container_width=True)
             
             st.markdown("---")
-            st.markdown("#### 📧 E-mail Gerado")
-            st.info("💡 Arraste o mouse sobre o quadro tracejado abaixo, aperte **Ctrl+C** e cole direto no corpo do seu Outlook!")
+            st.markdown("#### 📧 E-mail Executivo Gerado")
+            st.info("💡 Arraste o mouse sobre o quadro tracejado abaixo, aperte **Ctrl+C** e cole direto no corpo do seu Outlook! Os cálculos são automáticos baseados na semana selecionada.")
             
-            html_cal = """
+            # --- MOTOR GERADOR DE TEXTO DE INDICADORES ---
+            df_email = df_hist_limpo[df_hist_limpo['DATA'].isin([d.strftime('%Y-%m-%d') for d in dates])].copy()
+            for c in ['VALOR INICIAL', 'SALDO INICIAL', 'DIVERGENCIA DE SALDO', 'DIVERGENCIA DE VALOR', 'CONTAGEM FINAL']:
+                if c in df_email.columns:
+                    df_email[c] = pd.to_numeric(df_email[c], errors='coerce').fillna(0)
+            
+            def fmt_br(val, is_currency=False):
+                s = f"{val:,.2f}" if is_currency else f"{val:,.0f}"
+                return s.replace(',', 'X').replace('.', ',').replace('X', '.')
+            
+            def gerar_texto_indicadores(df_subset, titulo):
+                if df_subset.empty: return ""
+                
+                skus_totais = len(df_subset)
+                skus_div = len(df_subset[df_subset['DIVERGENCIA DE SALDO'] != 0])
+                perc_skus_div = (skus_div / skus_totais * 100) if skus_totais > 0 else 0
+                
+                valor_inicial = df_subset['VALOR INICIAL'].sum()
+                div_valor = df_subset['DIVERGENCIA DE VALOR'].sum()
+                valor_final = valor_inicial + div_valor
+                perc_div_valor = (abs(div_valor) / valor_inicial * 100) if valor_inicial > 0 else 0
+                
+                tipo_mov_valor = "uma perda" if div_valor < 0 else "um ganho"
+                tipo_mov_estoque = "reduzindo" if div_valor < 0 else "aumentando"
+                tipo_baixa_alta = "baixa" if div_valor < 0 else "alta"
+                
+                saldo_inicial = df_subset['SALDO INICIAL'].sum()
+                div_saldo = df_subset['DIVERGENCIA DE SALDO'].sum()
+                saldo_final = df_subset['CONTAGEM FINAL'].sum()
+                
+                tipo_mov_vol = "uma redução" if div_saldo < 0 else "um aumento"
+                
+                html = f"<h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;'>{titulo}</h4>"
+                html += "<ul style='margin-top: 5px; margin-bottom: 15px;'>"
+                html += f"<li>Dos <b>{skus_totais}</b> SKUs inventariados, <b>{skus_div}</b> apresentaram divergências, representando aproximadamente <b>{perc_skus_div:.0f}%</b> da lista.</li>"
+                
+                if round(div_valor, 2) != 0:
+                    html += f"<li>Foi identificada {tipo_mov_valor} de inventário no valor de <b>R$ {fmt_br(abs(div_valor), True)}</b>, {tipo_mov_estoque} o estoque de R$ {fmt_br(valor_inicial, True)} para R$ {fmt_br(valor_final, True)}, o que representa uma {tipo_baixa_alta} de <b>{perc_div_valor:.0f}%</b>.</li>"
+                else:
+                    html += f"<li>O valor do estoque se manteve em R$ {fmt_br(valor_inicial, True)}, sem perdas ou ganhos financeiros.</li>"
+                    
+                if round(div_saldo, 0) != 0:
+                    html += f"<li>Em volume, houve {tipo_mov_vol} de <b>{fmt_br(abs(div_saldo))}</b> unidades, fazendo o estoque passar de {fmt_br(saldo_inicial)} para {fmt_br(saldo_final)} unidades.</li>"
+                else:
+                    html += f"<li>Em volume, o estoque geral de {fmt_br(saldo_inicial)} unidades foi mantido.</li>"
+                    
+                html += "</ul>"
+                return html
+
+            indicadores_html = ""
+            if not df_email.empty:
+                indicadores_html += "<div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #2e7bcf; margin: 20px 0;'>"
+                indicadores_html += "<h3 style='color: #2e7bcf; margin-bottom: 10px; margin-top: 0;'>📊 Resumo de Indicadores da Semana</h3>"
+                
+                indicadores_html += gerar_texto_indicadores(df_email, "Consolidado Geral (Todas as Filiais)")
+                
+                for f_code in filiais_unicas:
+                    df_fil = df_email[df_email['FILIAL'] == f_code]
+                    if not df_fil.empty:
+                        nome_filial = filiais_map.get(f_code, f"FILIAL {f_code}")
+                        indicadores_html += gerar_texto_indicadores(df_fil, f"Resultado: {nome_filial}")
+                        
+                indicadores_html += "</div>"
+            # ------------------------------------------------
+            
+            html_cal = f"""
             <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 15px; border: 2px dashed #999; border-radius: 5px;">
                 <p>Boa tarde!</p>
                 <p>Segue o resumo <span style="background-color: #ffff00; font-weight: bold;">semanal</span> dos inventários.</p>
                 <p><b>Em anexo, seguem todos os itens ajustados da semana.</b></p>
                 <p>Os ajustes são realizados após o envio da recontagem. Conforme alinhado, caso a contagem ou a recontagem não seja realizada, solicitamos o envio da justificativa correspondente.</p>
+                
+                {indicadores_html}
+                
                 <p>Calendário de contagens e recontagens por filial:</p>
                 <table style="border-collapse: collapse; text-align: center; margin-top: 15px;">
                     <tr><th style="border: none;"></th>
