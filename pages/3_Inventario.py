@@ -18,7 +18,6 @@ def obter_primeira_coluna(df, nomes_possiveis):
     return None
 
 # --- CARREGAR BASES DO COFRE BLINDADAS ---
-# Utilizamos ttl=0 para garantir que o sistema sempre puxe a versão mais recente do banco
 try:
     df_cad_raw = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
     if not df_cad_raw.empty:
@@ -99,22 +98,20 @@ def carregar_historico():
     except:
         return pd.DataFrame()
 
+# O PULO DO GATO ESTÁ AQUI: Novo motor super flexível para aceitar "quantidade", "codigo", etc.
 def padronizar_colunas(df_bruto, nome_coluna_alvo):
     df = df_bruto.copy()
     colunas_upper = {str(c).upper().strip(): c for c in df.columns}
     
-    col_filial = colunas_upper.get('FILIAL')
-    col_prod = colunas_upper.get('PRODUTO')
-    if not col_prod: col_prod = colunas_upper.get('INFORMAR CODIGO')
-    
-    col_cont = colunas_upper.get('CONTAGEM')
-    if not col_cont: col_cont = colunas_upper.get('CONTAGEM 1')
-    if not col_cont: col_cont = colunas_upper.get('CONTAGEM 2')
-    if not col_cont: col_cont = colunas_upper.get('QTD')
-    
-    col_armazem = colunas_upper.get('ARMAZEM')
-    if not col_armazem: col_armazem = colunas_upper.get('ARMAZÉM')
-    if not col_armazem: col_armazem = colunas_upper.get('LOCAL')
+    def obter_chave(nomes_possiveis):
+        for nome in nomes_possiveis:
+            if nome in colunas_upper: return colunas_upper[nome]
+        return None
+        
+    col_filial = obter_chave(['FILIAL'])
+    col_prod = obter_chave(['PRODUTO', 'INFORMAR CODIGO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'EAN', 'COD BARRAS'])
+    col_cont = obter_chave(['CONTAGEM', 'CONTAGEM 1', 'CONTAGEM 2', 'QTD', 'QUANTIDADE', 'SALDO'])
+    col_armazem = obter_chave(['ARMAZEM', 'ARMAZÉM', 'LOCAL'])
     
     if col_filial and col_prod and col_cont:
         cols_extract = [col_filial, col_prod, col_cont]
@@ -388,7 +385,6 @@ with aba1:
                 filiais_atuais = df_res_atual['FILIAL'].astype(str).unique()
                 
                 if not df_hist.empty:
-                    # Remove da base em memória os registros deste mesmo período/data/filial para não duplicar
                     df_hist = df_hist[~((df_hist['PERIODO'].astype(str) == str(periodo_input)) & 
                                         (df_hist['DATA'].astype(str) == str(data_inv_input)) & 
                                         (df_hist['FILIAL'].astype(str).isin(filiais_atuais)))]
@@ -399,7 +395,6 @@ with aba1:
                 
                 df_hist_novo = pd.concat([df_hist, df_salvar], ignore_index=True)
                 
-                # O PULO DO GATO CLOUD: Substituímos a tabela inteira do Supabase pela nova consolidada
                 df_hist_novo.to_sql("historico_inventario", con=conn.engine, if_exists='replace', index=False)
                 
                 st.success(f"Inventário salvo com sucesso no banco de dados corporativo (Período {periodo_input})!")
@@ -429,7 +424,6 @@ with aba2:
         if not df_filtro.empty:
             resumo_gerencial = []
             
-            # Garante que as colunas críticas existam e sejam numéricas
             cols_calc = ['VALOR INICIAL', 'SALDO INICIAL', 'DIVERGENCIA DE SALDO', 'DIVERGENCIA DE VALOR', 'CONTAGEM FINAL']
             for c in cols_calc:
                 if c in df_filtro.columns:
@@ -438,7 +432,6 @@ with aba2:
                     df_filtro[c] = 0.0
 
             if "Consolidada" in visao:
-                # AGRUPAMENTO TOTAL PARA A VISÃO CONSOLIDADA
                 for filial, group in df_filtro.groupby('FILIAL'):
                     resumo_gerencial.append({
                         "PERÍODO": per_selecionado,
@@ -450,7 +443,6 @@ with aba2:
                         "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                     })
                     
-                # Base de Detalhes dos Produtos (Consolidada)
                 df_detalhe = df_filtro.groupby(['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO'], as_index=False).agg({
                     'SALDO INICIAL': 'sum',
                     'CONTAGEM FINAL': 'sum',
@@ -459,7 +451,6 @@ with aba2:
                     'DIVERGENCIA DE VALOR': 'sum'
                 })
             else:
-                # AGRUPAMENTO POR DATA/FILIAL PARA VISÃO DETALHADA
                 for (data, filial), group in df_filtro.groupby(['DATA', 'FILIAL']):
                     try:
                         data_formatada = datetime.datetime.strptime(str(data), '%Y-%m-%d').strftime('%d/%m/%Y')
@@ -476,7 +467,6 @@ with aba2:
                         "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                     })
                     
-                # Base de Detalhes dos Produtos (Detalhada)
                 df_detalhe = df_filtro[['DATA', 'FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO', 'SALDO INICIAL', 'CONTAGEM FINAL', 'DIVERGENCIA DE SALDO', 'VALOR INICIAL', 'DIVERGENCIA DE VALOR']].copy()
             
             st.markdown("### 📋 Resumo Agregado")
