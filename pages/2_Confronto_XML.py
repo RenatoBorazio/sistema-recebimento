@@ -30,71 +30,71 @@ def limpar_zeros_pedido(ped):
     if p.isdigit(): return str(int(p))
     return p
 
-def carregar_bases():
-    # --- CARREGAR CADASTRO (SB1) ---
-    try:
-        df_cad = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
-        if not df_cad.empty:
-            colunas_mapeadas = {}
-            for c in df_cad.columns:
-                nome_upper = str(c).upper().strip()
-                if nome_upper in ['CÓDIGO DE BARRAS', 'COD BARRAS', 'EAN', 'CODIGO DE BARRAS', 'COD. BARRAS']: colunas_mapeadas[c] = 'CÓDIGO DE BARRAS'
-                elif nome_upper in ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO INTERNO']: colunas_mapeadas[c] = 'CÓDIGO INTERNO'
-                elif nome_upper in ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME']: colunas_mapeadas[c] = 'DESCRIÇÃO SB1'
-                elif nome_upper in ['FATOR', 'FATOR CONV.', 'FATOR CONVERSAO']: colunas_mapeadas[c] = 'FATOR'
-                elif nome_upper in ['ULTIMO PRECO', 'PRECO VENDA', 'CUSTO STAND.', 'ULTIMO PREÇO', 'ULT. PRECO']: colunas_mapeadas[c] = 'ULTIMO PRECO'
-            
-            df_cad.rename(columns=colunas_mapeadas, inplace=True)
-            
-            for col in ['CÓDIGO DE BARRAS', 'CÓDIGO INTERNO', 'DESCRIÇÃO SB1', 'FATOR', 'ULTIMO PRECO']:
-                if col not in df_cad.columns: df_cad[col] = ""
+def obter_primeira_coluna(df, nomes_possiveis):
+    for nome in nomes_possiveis:
+        if nome in df.columns: return nome
+    return None
 
-            df_cad['CÓDIGO DE BARRAS'] = df_cad['CÓDIGO DE BARRAS'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            df_cad['CÓDIGO INTERNO'] = df_cad['CÓDIGO INTERNO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            df_cad['DESCRIÇÃO SB1'] = df_cad['DESCRIÇÃO SB1'].astype(str).replace(['nan', 'None', '<NA>'], '').str.strip()
+def carregar_bases():
+    # --- CARREGAR CADASTRO (SB1) BLINDADO CONTRA COLUNAS DUPLICADAS ---
+    try:
+        df_cad_raw = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
+        if not df_cad_raw.empty:
+            df_cad_raw.columns = [str(c).upper().strip() for c in df_cad_raw.columns]
             
-            df_cad['FATOR'] = pd.to_numeric(df_cad['FATOR'], errors='coerce').fillna(1)
-            df_cad['ULTIMO PRECO'] = pd.to_numeric(df_cad['ULTIMO PRECO'], errors='coerce').fillna(0.0)
+            c_barras = obter_primeira_coluna(df_cad_raw, ['CÓDIGO DE BARRAS', 'COD BARRAS', 'EAN', 'CODIGO DE BARRAS', 'COD. BARRAS'])
+            c_int = obter_primeira_coluna(df_cad_raw, ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO INTERNO'])
+            c_desc = obter_primeira_coluna(df_cad_raw, ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME'])
+            c_fator = obter_primeira_coluna(df_cad_raw, ['FATOR', 'FATOR CONV.', 'FATOR CONVERSAO'])
+            c_preco = obter_primeira_coluna(df_cad_raw, ['ULT. PRECO', 'ULT. PREÇO', 'ULTIMO PRECO', 'ULTIMO PREÇO', 'CUSTO STAND.', 'CUSTO', 'PRECO VENDA'])
             
+            df_cad = pd.DataFrame()
+            df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
+            df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
+            df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', '<NA>'], '').str.strip() if c_desc else ""
+            df_cad['FATOR'] = pd.to_numeric(df_cad_raw[c_fator], errors='coerce').fillna(1) if c_fator else 1
+            df_cad['ULTIMO PRECO'] = pd.to_numeric(df_cad_raw[c_preco], errors='coerce').fillna(0.0) if c_preco else 0.0
+        else:
+            df_cad = pd.DataFrame()
     except Exception as e:
         st.error(f"Erro interno ao ler o Cadastro (SB1): {e}")
         df_cad = pd.DataFrame()
         
-    # --- CARREGAR BASE DE PEDIDOS (PC) ---
+    # --- CARREGAR BASE DE PEDIDOS (PC) BLINDADO ---
     try:
-        df_pc = conn.query("SELECT * FROM base_pedidos", ttl=0).astype(str)
-        if not df_pc.empty:
-            colunas_mapeadas_pc = {}
-            for c in df_pc.columns:
-                nome_upper = str(c).upper().strip()
-                if nome_upper in ['NUMERO PC', 'NUMERO', 'PEDIDO']: colunas_mapeadas_pc[c] = 'Numero PC'
-                elif nome_upper in ['COD BARRAS', 'EAN', 'BARRAS']: colunas_mapeadas_pc[c] = 'Cod Barras'
-                elif nome_upper in ['PRC UNITARIO', 'PRECO', 'PREÇO', 'UNITARIO']: colunas_mapeadas_pc[c] = 'Prc Unitario'
-                elif nome_upper in ['PED. ENCERR.', 'ENCERR']: colunas_mapeadas_pc[c] = 'Ped. Encerr.'
-                elif nome_upper in ['RESID. ELIM.', 'ELIM']: colunas_mapeadas_pc[c] = 'Resid. Elim.'
-                elif nome_upper in ['QUANTIDADE', 'QTD']: colunas_mapeadas_pc[c] = 'Quantidade'
-                elif nome_upper in ['QTD.ENTREGUE', 'ENTREGUE']: colunas_mapeadas_pc[c] = 'Qtd.Entregue'
-                elif nome_upper in ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO']: colunas_mapeadas_pc[c] = 'Produto'
-
-            df_pc.rename(columns=colunas_mapeadas_pc, inplace=True)
+        df_pc_raw = conn.query("SELECT * FROM base_pedidos", ttl=0).astype(str)
+        if not df_pc_raw.empty:
+            df_pc_raw.columns = [str(c).upper().strip() for c in df_pc_raw.columns]
             
-            if 'Numero PC' not in df_pc.columns: raise KeyError("Coluna de Pedido não encontrada no PC.")
-            if 'Cod Barras' not in df_pc.columns: raise KeyError("Coluna de Barras/EAN não encontrada no PC.")
+            c_num = obter_primeira_coluna(df_pc_raw, ['NUMERO PC', 'NUMERO', 'PEDIDO', 'NÚMERO'])
+            c_barras_pc = obter_primeira_coluna(df_pc_raw, ['COD BARRAS', 'EAN', 'BARRAS', 'GTIN', 'CÓDIGO DE BARRAS', 'CODIGO DE BARRAS'])
+            c_prc = obter_primeira_coluna(df_pc_raw, ['PRC UNITARIO', 'PRECO UNITARIO', 'PRECO', 'PREÇO', 'UNITARIO', 'VLR.UNIT'])
+            c_enc = obter_primeira_coluna(df_pc_raw, ['PED. ENCERR.', 'ENCERR'])
+            c_elim = obter_primeira_coluna(df_pc_raw, ['RESID. ELIM.', 'ELIM'])
+            c_qtd = obter_primeira_coluna(df_pc_raw, ['QUANTIDADE', 'QTD'])
+            c_ent = obter_primeira_coluna(df_pc_raw, ['QTD.ENTREGUE', 'ENTREGUE'])
+            c_prod = obter_primeira_coluna(df_pc_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'CÓD. PRODUTO'])
 
-            df_pc['Numero PC'] = df_pc['Numero PC'].astype(str).str.replace(r'\.0$', '', regex=True).apply(limpar_zeros_pedido)
-            df_pc['Cod Barras'] = df_pc['Cod Barras'].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip()
-            df_pc['Prc Unitario'] = pd.to_numeric(df_pc.get('Prc Unitario', 0), errors='coerce').fillna(0.0)
-            df_pc['Produto'] = df_pc['Produto'].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if 'Produto' in df_pc.columns else ""
+            if not c_num: raise KeyError("Coluna de Pedido não encontrada no PC.")
+            if not c_barras_pc: raise KeyError("Coluna de Barras/EAN não encontrada no PC.")
+
+            df_pc = pd.DataFrame()
+            df_pc['Numero PC'] = df_pc_raw[c_num].astype(str).str.replace(r'\.0$', '', regex=True).apply(limpar_zeros_pedido)
+            df_pc['Cod Barras'] = df_pc_raw[c_barras_pc].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip()
+            df_pc['Prc Unitario'] = pd.to_numeric(df_pc_raw[c_prc], errors='coerce').fillna(0.0) if c_prc else 0.0
+            df_pc['Produto'] = df_pc_raw[c_prod].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
             
             def calcular_saldo(row):
-                enc = str(row.get('Ped. Encerr.', '')).strip().upper()
-                elim = str(row.get('Resid. Elim.', '')).strip().upper()
+                enc = str(row.get(c_enc, '')).strip().upper() if c_enc else ''
+                elim = str(row.get(c_elim, '')).strip().upper() if c_elim else ''
                 if enc == 'E' or elim == 'S': return 0.0
-                q = pd.to_numeric(row.get('Quantidade', 0), errors='coerce')
-                e = pd.to_numeric(row.get('Qtd.Entregue', 0), errors='coerce')
+                q = pd.to_numeric(row.get(c_qtd, 0) if c_qtd else 0, errors='coerce')
+                e = pd.to_numeric(row.get(c_ent, 0) if c_ent else 0, errors='coerce')
                 return (q if pd.notna(q) else 0.0) - (e if pd.notna(e) else 0.0)
                 
-            df_pc['Saldo Disponivel'] = df_pc.apply(calcular_saldo, axis=1)
+            df_pc['Saldo Disponivel'] = df_pc_raw.apply(calcular_saldo, axis=1)
+        else:
+            df_pc = pd.DataFrame()
     except Exception as e:
         st.error(f"Erro interno ao ler a Base de Pedidos (PC): {e}")
         df_pc = pd.DataFrame()
@@ -366,9 +366,10 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                 m_barra = df_barras[df_barras['EAN'].astype(str).str.lstrip('0') == ean_clean]
                 if not m_barra.empty and 'CODIGO INTERNO' in m_barra.columns: 
                     cod_interno = str(m_barra['CODIGO INTERNO'].iloc[0]).strip().lstrip('0')
-            if not cod_interno and not df_cad.empty and ean_clean and 'CÓDIGO INTERNO' in df_cad.columns:
+            if not cod_interno and not df_cad.empty and ean_clean and 'CÓDIGO DE BARRAS' in df_cad.columns:
                 m_cad = df_cad[df_cad['CÓDIGO DE BARRAS'].astype(str).str.lstrip('0') == ean_clean]
-                if not m_cad.empty: cod_interno = str(m_cad['CÓDIGO INTERNO'].iloc[0]).strip().lstrip('0')
+                if not m_cad.empty and 'CÓDIGO INTERNO' in m_cad.columns: 
+                    cod_interno = str(m_cad['CÓDIGO INTERNO'].iloc[0]).strip().lstrip('0')
                     
             if len(peds_multiplos) > 1:
                 qtde_xml_raw_total = float(row.get('QTDE', 0))
@@ -516,7 +517,6 @@ if not df_recebimentos.empty:
                     status_tag = "🔴 [VERIFICAR]" if itens_com_divergencia else "🟢 [LIBERADO]"
                     
                     with st.expander(f"{status_tag} 🧾 NF: {nf} ({tipo_nf_atual}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=False):
-                        # TRAVA DE FORMULÁRIO: Congela a tela até que o usuário clique no botão salvar!
                         with st.form(key=f"form_nf_{filial}_{nf}"):
                             col1, col2 = st.columns([2, 2])
                             with col1:
@@ -758,9 +758,9 @@ if not df_recebimentos.empty:
                     if header_idx != -1:
                         df_prot = pd.read_excel(arquivo_prot, header=header_idx+1)
                         
-                        col_doc = next((c for c in df_prot.columns if 'doc' in str(c).lower() and 'orig' not in str(c).lower()), None)
-                        col_prod = next((c for c in df_prot.columns if 'prod' in str(c).lower()), None)
-                        col_qtde = next((c for c in df_prot.columns if 'quan' in str(c).lower()), None)
+                        col_doc = obter_primeira_coluna(df_prot, [c for c in df_prot.columns if 'doc' in str(c).lower() and 'orig' not in str(c).lower()])
+                        col_prod = obter_primeira_coluna(df_prot, [c for c in df_prot.columns if 'prod' in str(c).lower()])
+                        col_qtde = obter_primeira_coluna(df_prot, [c for c in df_prot.columns if 'quan' in str(c).lower()])
                         
                         if col_doc and col_prod and col_qtde:
                             df_prot[col_doc] = df_prot[col_doc].astype(str).str.replace(r'\.0$', '', regex=True)
