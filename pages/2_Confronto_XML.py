@@ -36,7 +36,6 @@ def obter_primeira_coluna(df, nomes_possiveis):
     return None
 
 def carregar_bases():
-    # --- CARREGAR CADASTRO (SB1) BLINDADO CONTRA COLUNAS DUPLICADAS ---
     try:
         df_cad_raw = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
         if not df_cad_raw.empty:
@@ -60,7 +59,6 @@ def carregar_bases():
         st.error(f"Erro interno ao ler o Cadastro (SB1): {e}")
         df_cad = pd.DataFrame()
         
-    # --- CARREGAR BASE DE PEDIDOS (PC) BLINDADO ---
     try:
         df_pc_raw = conn.query("SELECT * FROM base_pedidos", ttl=0).astype(str)
         if not df_pc_raw.empty:
@@ -99,7 +97,6 @@ def carregar_bases():
         st.error(f"Erro interno ao ler a Base de Pedidos (PC): {e}")
         df_pc = pd.DataFrame()
         
-    # --- CARREGAR BARRAS ADICIONAIS ---
     try:
         df_barras = conn.query("SELECT * FROM barras_adicionais", ttl=0).astype(str)
         if not df_barras.empty:
@@ -180,7 +177,6 @@ def processar_novos_xmls(xml_files, df_existente):
         vNF_node = infNFe.find('.//nfe:total/nfe:ICMSTot/nfe:vNF', namespaces)
         v_total_xml = float(vNF_node.text) if vNF_node is not None else 0.0
         
-        # O PULO DO GATO 1: Força o pedido global a ter EXATAMENTE 5 dígitos após derreter zeros à esquerda
         infCpl = infNFe.find('.//nfe:infAdic/nfe:infCpl', namespaces)
         match = re.search(r'(?:pedido|ped)\b[^\d]*0*(\d{5})\b', infCpl.text if infCpl is not None else "", re.IGNORECASE)
         pedido_global = match.group(1) if match else ""
@@ -203,7 +199,6 @@ def processar_novos_xmls(xml_files, df_existente):
                 if vDesc > 0 and qCom > 0:
                     vUnCom = vUnCom - (vDesc / qCom)
             
-            # O PULO DO GATO 2: Força o pedido do item a ter EXATAMENTE 5 dígitos
             xPed = prod.find('nfe:xPed', namespaces)
             item_po_raw = xPed.text.strip() if xPed is not None and xPed.text else ""
             item_po = ""
@@ -240,6 +235,20 @@ def recalcular_pendentes(df):
     if df.empty: return df
     pc_pedidos_list = df_pc['Numero PC'].astype(str).unique()
     
+    # === A NOVA MEMÓRIA DINÂMICA DE SALDOS (PULO DO GATO 2) ===
+    # Isso armazena o saldo consumido por PC e Produto em tempo real
+    consumo_pc = {}
+    
+    # Passo 1: Deduzir previamente o saldo das notas já FINALIZADAS que ainda estão no cache
+    for idx, row in df[df['Finalizado'] == True].iterrows():
+        po = row.get('Pedido Considerado', '')
+        cod = row.get('Código Interno', '')
+        qtde_real_fin = float(row.get('QTDE REAL', 0))
+        if po and po != "Sem Pedido" and cod:
+            chave = f"{po}_{cod}"
+            consumo_pc[chave] = consumo_pc.get(chave, 0.0) + qtde_real_fin
+    
+    # Passo 2: Calcular as notas Pendentes, deduzindo saldo linha a linha
     for idx, row in df.iterrows():
         if row.get('Finalizado', False) == True: continue 
             
@@ -267,7 +276,6 @@ def recalcular_pendentes(df):
         item_po_xml = limpar_zeros_pedido(row.get('Pedido XML'))
         global_po_xml = limpar_zeros_pedido(row.get('Pedido Global XML'))
         
-        # O PULO DO GATO 3: Impede dados antigos do banco de poluir a tela se não tiverem 5 dígitos
         if item_po_xml and len(item_po_xml) != 5: item_po_xml = ""
         if global_po_xml and len(global_po_xml) != 5: global_po_xml = ""
         
@@ -284,6 +292,8 @@ def recalcular_pendentes(df):
         saldo_pc, custo_pc = 0.0, 0.0
         match_pc = pd.DataFrame()
         
+        chave_consumo = ""
+        
         if final_po != "Sem Pedido":
             if ean_clean:
                 match_pc = df_pc[(df_pc['Numero PC'].astype(str) == final_po) & (df_pc['Cod Barras'].astype(str).str.lstrip('0') == ean_clean)]
@@ -294,10 +304,15 @@ def recalcular_pendentes(df):
             if match_pc.empty and cod_interno and 'Produto' in df_pc.columns:
                 match_pc = df_pc[(df_pc['Numero PC'].astype(str) == final_po) & (df_pc['Produto'].astype(str).str.lstrip('0') == cod_interno)]
                 
-            if match_pc.empty: status_list.append("Inexistente no PC")
+            if match_pc.empty: 
+                status_list.append("Inexistente no PC")
             else:
-                saldo_pc = float(match_pc['Saldo Disponivel'].iloc[0])
+                saldo_pc_banco = float(match_pc['Saldo Disponivel'].iloc[0])
                 custo_pc = float(match_pc['Prc Unitario'].iloc[0])
+                
+                chave_consumo = f"{final_po}_{cod_interno}"
+                # Calcula o saldo real deduzindo o que as notas/linhas anteriores já consumiram na tela!
+                saldo_pc = saldo_pc_banco - consumo_pc.get(chave_consumo, 0.0)
         else: 
             status_list.append("Sem Pedido")
 
@@ -336,6 +351,9 @@ def recalcular_pendentes(df):
             if round(qtde_real, 2) > round(saldo_pc, 2): status_list.append("Saldo Insuficiente")
             if round(custo_unit_real, 2) > round(custo_pc, 2): status_list.append("Custo Maior que PC")
             
+            # Adiciona o consumo DESTA linha na memória para abater da próxima!
+            consumo_pc[chave_consumo] = consumo_pc.get(chave_consumo, 0.0) + qtde_real
+            
         if abs(var_custo) > 30.0: avisos_list.append("Preço Destoante (>30%)")
         if fator_ativo > 1: avisos_list.append(f"Conv.(x{fator_ativo})")
             
@@ -346,7 +364,7 @@ def recalcular_pendentes(df):
         df.at[idx, 'Variação Custo (%)'] = var_custo
         df.at[idx, 'Código Interno'] = cod_interno_manual if cod_interno_manual else cod_interno
         df.at[idx, 'Produto (SB1)'] = desc_sb1
-        df.at[idx, 'Saldo Pedido (PC)'] = saldo_pc
+        df.at[idx, 'Saldo Pedido (PC)'] = saldo_pc  # Mostra o saldo DISPONÍVEL para esta linha!
         df.at[idx, 'Custo PC'] = custo_pc
         df.at[idx, 'Pedido Considerado'] = final_po
         df.at[idx, 'Avisos'] = " | ".join(avisos_list) if avisos_list else ""
@@ -530,6 +548,16 @@ if not df_recebimentos.empty:
                     status_tag = "🔴 [VERIFICAR]" if itens_com_divergencia else "🟢 [LIBERADO]"
                     
                     with st.expander(f"{status_tag} 🧾 NF: {nf} ({tipo_nf_atual}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=False):
+                        
+                        # --- NOVO BOTÃO DE EXCLUIR NF INDIVIDUAL ---
+                        col_del, _ = st.columns([2, 8])
+                        with col_del:
+                            if st.button(f"🗑️ Excluir esta NF ({nf})", key=f"del_btn_{filial}_{nf}"):
+                                idx_drop = df_recebimentos[(df_recebimentos['Filial'] == filial) & (df_recebimentos['Nota Fiscal'] == nf) & (df_recebimentos['Finalizado'] == False)].index
+                                df_recebimentos = df_recebimentos.drop(index=idx_drop)
+                                salvar_recebimentos_nuvem(df_recebimentos)
+                                st.rerun()
+                        
                         with st.form(key=f"form_nf_{filial}_{nf}"):
                             col1, col2 = st.columns([2, 2])
                             with col1:
@@ -655,99 +683,116 @@ if not df_recebimentos.empty:
             
     # === ABA 2: FINALIZADOS / PROTHEUS ===
     with aba2:
-        df_finalizados = df_recebimentos[df_recebimentos['Finalizado'] == True].copy()
+        df_finalizados_all = df_recebimentos[df_recebimentos['Finalizado'] == True].copy()
         
-        if not df_finalizados.empty:
+        if not df_finalizados_all.empty:
             st.markdown("### 📥 Confirmação Protheus e Relatório Diário")
             st.write("Aqui estão as notas aguardando entrada sistêmica. Clique em Confirmar Entrada para gerar a data no Relatório.")
             
-            filiais_fin = sorted(df_finalizados['Filial'].unique())
-            for filial in filiais_fin:
-                df_filial_fin = df_finalizados[df_finalizados['Filial'] == filial]
-                notas_fin = df_filial_fin['Nota Fiscal'].unique()
+            # --- NOVO FILTRO DE DATAS ---
+            # Troca os vazios pela tag "Aguardando Protheus"
+            df_finalizados_all['Filtro Data'] = df_finalizados_all['Data Finalização'].apply(lambda x: "Aguardando Protheus" if str(x).strip() == "" else str(x).strip())
+            
+            datas_disponiveis = sorted(df_finalizados_all['Filtro Data'].unique(), reverse=True)
+            
+            colF1, colF2 = st.columns([1, 2])
+            with colF1:
+                datas_selecionadas = st.multiselect("📅 Filtrar por Data de Finalização:", options=datas_disponiveis, default=datas_disponiveis)
                 
-                for nf in notas_fin:
-                    df_nf_fin = df_filial_fin[df_filial_fin['Nota Fiscal'] == nf]
-                    fornecedor = df_nf_fin['Fornecedor'].iloc[0]
-                    v_total = float(df_nf_fin['Valor Total XML'].iloc[0])
-                    tipo_nf = df_nf_fin['Tipo NF'].iloc[0]
-                    is_confirmada = df_nf_fin['Confirmado'].all()
+            st.divider()
+            
+            df_finalizados = df_finalizados_all[df_finalizados_all['Filtro Data'].isin(datas_selecionadas)]
+            
+            if not df_finalizados.empty:
+                filiais_fin = sorted(df_finalizados['Filial'].unique())
+                for filial in filiais_fin:
+                    df_filial_fin = df_finalizados[df_finalizados['Filial'] == filial]
+                    notas_fin = df_filial_fin['Nota Fiscal'].unique()
                     
-                    status_fin = "🔵 [CONFIRMADO]" if is_confirmada else "⚪ [AGUARDANDO PROTHEUS]"
-                    
-                    with st.expander(f"{status_fin} 🧾 NF: {nf} ({tipo_nf}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=not is_confirmada):
-                        st.dataframe(df_nf_fin[["Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real", "Data Finalização"]], use_container_width=True, hide_index=True)
+                    for nf in notas_fin:
+                        df_nf_fin = df_filial_fin[df_filial_fin['Nota Fiscal'] == nf]
+                        fornecedor = df_nf_fin['Fornecedor'].iloc[0]
+                        v_total = float(df_nf_fin['Valor Total XML'].iloc[0])
+                        tipo_nf = df_nf_fin['Tipo NF'].iloc[0]
+                        is_confirmada = df_nf_fin['Confirmado'].all()
                         
-                        hoje = datetime.datetime.now().strftime('%Y-%m-%d')
-                        colA, colB, colC = st.columns([1, 1, 1])
-                        with colA:
-                            if not is_confirmada:
-                                if st.button(f"✅ Confirmar Entrada Protheus ({nf})", key=f"btn_conf_{filial}_{nf}", type="primary", use_container_width=True):
+                        status_fin = "🔵 [CONFIRMADO]" if is_confirmada else "⚪ [AGUARDANDO PROTHEUS]"
+                        
+                        with st.expander(f"{status_fin} 🧾 NF: {nf} ({tipo_nf}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=not is_confirmada):
+                            st.dataframe(df_nf_fin[["Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real", "Data Finalização"]], use_container_width=True, hide_index=True)
+                            
+                            hoje = datetime.datetime.now().strftime('%Y-%m-%d')
+                            colA, colB, colC = st.columns([1, 1, 1])
+                            with colA:
+                                if not is_confirmada:
+                                    if st.button(f"✅ Confirmar Entrada Protheus ({nf})", key=f"btn_conf_{filial}_{nf}", type="primary", use_container_width=True):
+                                        idx_to_update = df_recebimentos[(df_recebimentos['Filial'] == filial) & (df_recebimentos['Nota Fiscal'] == nf) & (df_recebimentos['Finalizado'] == True)].index
+                                        df_recebimentos.loc[idx_to_update, 'Confirmado'] = True
+                                        df_recebimentos.loc[idx_to_update, 'Data Finalização'] = hoje
+                                        salvar_recebimentos_nuvem(df_recebimentos)
+                                        st.rerun()
+                                else:
+                                    if st.button(f"↩️ Desfazer Confirmação ({nf})", key=f"btn_unconf_{filial}_{nf}", use_container_width=True):
+                                        idx_to_update = df_recebimentos[(df_recebimentos['Filial'] == filial) & (df_recebimentos['Nota Fiscal'] == nf) & (df_recebimentos['Finalizado'] == True)].index
+                                        df_recebimentos.loc[idx_to_update, 'Confirmado'] = False
+                                        df_recebimentos.loc[idx_to_update, 'Data Finalização'] = ""
+                                        salvar_recebimentos_nuvem(df_recebimentos)
+                                        st.rerun()
+                            with colC:
+                                if st.button(f"🔙 Devolver para Análise ({nf})", key=f"btn_return_{filial}_{nf}", use_container_width=True):
                                     idx_to_update = df_recebimentos[(df_recebimentos['Filial'] == filial) & (df_recebimentos['Nota Fiscal'] == nf) & (df_recebimentos['Finalizado'] == True)].index
-                                    df_recebimentos.loc[idx_to_update, 'Confirmado'] = True
-                                    df_recebimentos.loc[idx_to_update, 'Data Finalização'] = hoje
-                                    salvar_recebimentos_nuvem(df_recebimentos)
-                                    st.rerun()
-                            else:
-                                if st.button(f"↩️ Desfazer Confirmação ({nf})", key=f"btn_unconf_{filial}_{nf}", use_container_width=True):
-                                    idx_to_update = df_recebimentos[(df_recebimentos['Filial'] == filial) & (df_recebimentos['Nota Fiscal'] == nf) & (df_recebimentos['Finalizado'] == True)].index
+                                    df_recebimentos.loc[idx_to_update, 'Finalizado'] = False
                                     df_recebimentos.loc[idx_to_update, 'Confirmado'] = False
                                     df_recebimentos.loc[idx_to_update, 'Data Finalização'] = ""
                                     salvar_recebimentos_nuvem(df_recebimentos)
                                     st.rerun()
-                        with colC:
-                            if st.button(f"🔙 Devolver para Análise ({nf})", key=f"btn_return_{filial}_{nf}", use_container_width=True):
-                                idx_to_update = df_recebimentos[(df_recebimentos['Filial'] == filial) & (df_recebimentos['Nota Fiscal'] == nf) & (df_recebimentos['Finalizado'] == True)].index
-                                df_recebimentos.loc[idx_to_update, 'Finalizado'] = False
-                                df_recebimentos.loc[idx_to_update, 'Confirmado'] = False
-                                df_recebimentos.loc[idx_to_update, 'Data Finalização'] = ""
-                                salvar_recebimentos_nuvem(df_recebimentos)
-                                st.rerun()
 
-            st.divider()
-            df_confirmados = df_recebimentos[(df_recebimentos['Finalizado'] == True) & (df_recebimentos['Confirmado'] == True)]
-            
-            if not df_confirmados.empty:
-                st.markdown("### 📊 Exportação: Relatório Diário de Entradas")
-                relatorio_diario = []
-                for nf, group in df_confirmados.groupby("Nota Fiscal"):
-                    filial = group['Filial'].iloc[0]
-                    data_finalizacao = group['Data Finalização'].iloc[0]
-                    tipo = group['Tipo NF'].iloc[0]
-                    fornecedor = group['Fornecedor'].iloc[0]
-                    valor = float(group['Valor Total XML'].iloc[0])
-                    
-                    pedidos_nf = group['Pedido Considerado'].unique()
-                    pedidos_limpos = [str(p) for p in pedidos_nf if str(p) not in ["Sem Pedido", "nan", "", "None"]]
-                    n_pedido = ", ".join(pedidos_limpos)
-                    
-                    relatorio_diario.append({
-                        "FILIAL": filial,
-                        "DATA": data_finalizacao,
-                        "NF": str(nf),
-                        "TIPO": tipo,
-                        "FORNECEDOR": fornecedor,
-                        "N° PEDIDO": n_pedido,
-                        "VALOR": valor
-                    })
-                    
-                df_export = pd.DataFrame(relatorio_diario)
-                st.dataframe(df_export, use_container_width=True, hide_index=True)
+                st.divider()
+                df_confirmados = df_finalizados[df_finalizados['Confirmado'] == True]
                 
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df_export.to_excel(writer, sheet_name="Relatório Diário", index=False)
-                st.download_button("📥 Baixar Relatório Diário (Excel)", data=output.getvalue(), file_name="Relatorio_Entradas_Confirmadas.xlsx", type="primary")
+                if not df_confirmados.empty:
+                    st.markdown("### 📊 Exportação: Relatório Diário de Entradas")
+                    relatorio_diario = []
+                    for nf, group in df_confirmados.groupby("Nota Fiscal"):
+                        filial_g = group['Filial'].iloc[0]
+                        data_finalizacao = group['Data Finalização'].iloc[0]
+                        tipo = group['Tipo NF'].iloc[0]
+                        fornecedor_g = group['Fornecedor'].iloc[0]
+                        valor = float(group['Valor Total XML'].iloc[0])
+                        
+                        pedidos_nf = group['Pedido Considerado'].unique()
+                        pedidos_limpos = [str(p) for p in pedidos_nf if str(p) not in ["Sem Pedido", "nan", "", "None"]]
+                        n_pedido = ", ".join(pedidos_limpos)
+                        
+                        relatorio_diario.append({
+                            "FILIAL": filial_g,
+                            "DATA": data_finalizacao,
+                            "NF": str(nf),
+                            "TIPO": tipo,
+                            "FORNECEDOR": fornecedor_g,
+                            "N° PEDIDO": n_pedido,
+                            "VALOR": valor
+                        })
+                        
+                    df_export = pd.DataFrame(relatorio_diario)
+                    st.dataframe(df_export, use_container_width=True, hide_index=True)
+                    
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        df_export.to_excel(writer, sheet_name="Relatório Diário", index=False)
+                    st.download_button("📥 Baixar Relatório Diário (Excel)", data=output.getvalue(), file_name="Relatorio_Entradas_Confirmadas.xlsx", type="primary")
+                else:
+                    st.info("⚠️ Nenhuma nota das datas selecionadas foi confirmada ainda.")
+                    
+                st.divider()
+                with st.expander("Ver base detalhada de Finalizados (Visão Analítica para TOTVS)"):
+                    st.dataframe(df_finalizados[["Filial", "Nota Fiscal", "Tipo NF", "Data Finalização", "Fornecedor", "Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real"]], use_container_width=True, hide_index=True)
+                    output_det = io.BytesIO()
+                    with pd.ExcelWriter(output_det, engine='openpyxl') as writer:
+                        df_finalizados.to_excel(writer, sheet_name="Itens Finalizados", index=False)
+                    st.download_button("📥 Baixar Base Completa de Itens", data=output_det.getvalue(), file_name="xmls_finalizados_itens.xlsx")
             else:
-                st.info("⚠️ Nenhuma nota foi confirmada ainda. Confirme a entrada no Protheus para liberar a exportação do Relatório Diário.")
-                
-            st.divider()
-            with st.expander("Ver base detalhada de Finalizados (Visão Analítica para TOTVS)"):
-                st.dataframe(df_finalizados[["Filial", "Nota Fiscal", "Tipo NF", "Data Finalização", "Fornecedor", "Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real"]], use_container_width=True, hide_index=True)
-                output_det = io.BytesIO()
-                with pd.ExcelWriter(output_det, engine='openpyxl') as writer:
-                    df_finalizados.to_excel(writer, sheet_name="Itens Finalizados", index=False)
-                st.download_button("📥 Baixar Base Completa de Itens", data=output_det.getvalue(), file_name="xmls_finalizados_itens.xlsx")
+                st.info("⚠️ Não há notas para a(s) data(s) selecionada(s).")
         else:
             st.info("A gaveta de notas finalizadas está vazia.")
 
