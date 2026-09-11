@@ -230,7 +230,7 @@ def processar_novos_xmls(xml_files, df_existente):
             return pd.concat([df_existente, df_novos]).drop_duplicates(subset=['ID'], keep='last')
         return df_novos
     return df_existente
-    def recalcular_pendentes(df):
+def recalcular_pendentes(df):
     if df.empty: return df
     pc_pedidos_list = df_pc['Numero PC'].astype(str).unique()
     
