@@ -336,13 +336,17 @@ with aba1:
                 col_btn1, col_btn2 = st.columns([1, 1])
                 with col_btn1:
                     if not df_recontagem.empty:
+                        # Formulário de recontagem:
+                        # mantém a 1ª contagem (saldo efetivamente contado)
+                        # e deixa a 2ª contagem em branco para preenchimento.
                         df_export_rec = pd.DataFrame({
                             'FILIAL': df_recontagem['FILIAL'],
                             'ARMAZEM': df_recontagem['ARMAZEM'],
                             'CODIGO INTERNO': df_recontagem['CODIGO INTERNO'],
-                            'EAN': df_recontagem['EAN OFICIAL (SB1)'], 
+                            'EAN': df_recontagem['EAN OFICIAL (SB1)'],
                             'DESCRIÇÃO': df_recontagem['DESCRIÇÃO'],
-                            '2ª Contagem': "", 
+                            '1ª Contagem': df_recontagem['CONTAGEM 1'],
+                            '2ª Contagem': "",
                             '% DIV QTDE': (df_recontagem['%DIV QTDE'] * 100).map("{:.2f}%".format),
                             '% DIV VALOR': (df_recontagem['%DIV VALOR'] * 100).map("{:.2f}%".format)
                         })
