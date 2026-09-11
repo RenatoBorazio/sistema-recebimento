@@ -526,4 +526,323 @@ if not df_recebimentos.empty:
             
             for filial in filiais_unicas:
                 nome_filial = filial if filial not in ["N/D", "nan", "", "None"] else "Filial Não Identificada"
-                st.markdown(f"
+                st.markdown(f"df_filial = df_pendentes[df_pendentes['Filial'] == filial]
+            notas_unicas = df_filial['Nota Fiscal'].unique()
+            
+            for nf in notas_unicas:
+                df_nf = df_filial[df_filial['Nota Fiscal'] == nf].copy()
+                fornecedor = df_nf['Fornecedor'].iloc[0]
+                v_total = float(df_nf['Valor Total XML'].iloc[0])
+                pedido_nf_atual = df_nf['Pedido NF'].iloc[0]
+                tipo_nf_atual = df_nf['Tipo NF'].iloc[0]
+                
+                itens_com_divergencia = df_nf['Status'].apply(lambda s: str(s).strip() != "OK").any()
+                status_tag = "🔴 [VERIFICAR]" if itens_com_divergencia else "🟢 [LIBERADO]"
+                
+                with st.expander(f"{status_tag} 🧾 NF: {nf} ({tipo_nf_atual}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=False):
+                    
+                    col_del, _ = st.columns([2, 8])
+                    with col_del:
+                        if st.button(f"🗑️ Excluir esta NF ({nf})", key=f"del_btn_{filial}_{nf}"):
+                            idx_drop = df_recebimentos[(df_recebimentos['Filial'] == filial) & (df_recebimentos['Nota Fiscal'] == nf) & (df_recebimentos['Finalizado'] == False)].index
+                            df_recebimentos = df_recebimentos.drop(index=idx_drop)
+                            salvar_recebimentos_nuvem(df_recebimentos)
+                            st.rerun()
+                    
+                    with st.form(key=f"form_nf_{filial}_{nf}"):
+                        col1, col2 = st.columns([2, 2])
+                        with col1:
+                            novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual)
+                        
+                        cols_view = [
+                            "Duplicar", "Ação / Decisão", "Avisos", "Observações", "Pedido Considerado",
+                            "Pedido (Item)", "Código Interno", "Produto", "Produto (SB1)", "QTDE", "FATOR CONVERSÃO", 
+                            "FATOR AJUSTADO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", 
+                            "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"
+                        ]
+                        
+                        df_ed = st.data_editor(
+                            df_nf[cols_view],
+                            key=f"editor_nf_{filial}_{nf}",
+                            column_config={
+                                "Duplicar": st.column_config.CheckboxColumn("Duplicar ➕"),
+                                "Ação / Decisão": st.column_config.SelectboxColumn("Decisão", options=["Pendente", "Liberar Entrada", "Aguardar Correção", "Ajustar Pedido"]),
+                                "Pedido Considerado": st.column_config.TextColumn("Pedido Considerado"),
+                                "Pedido (Item)": st.column_config.TextColumn("Pedido Específico (Item)", help="Vírgulas aqui quebram APENAS esta linha."),
+                                "Código Interno": st.column_config.TextColumn("Código Interno ✏️", help="Editável. Digite o código caso não tenha sido localizado automaticamente."),
+                                "Produto": st.column_config.TextColumn("Produto (XML)"),
+                                "Produto (SB1)": st.column_config.TextColumn("Produto (SB1)"),
+                                "Avisos": st.column_config.TextColumn("Avisos Sistema"),
+                                "QTDE": st.column_config.NumberColumn("QTDE XML (Editar)", format="%.2f"),
+                                "FATOR AJUSTADO": st.column_config.NumberColumn("FATOR AJUSTADO", format="%d", min_value=1),
+                                "Variação Custo (%)": st.column_config.NumberColumn("Var. Custo (%)", format="%.2f %%"),
+                                "Custo Unitário Real": st.column_config.NumberColumn("Custo Líquido XML", format="R$ %.4f"),
+                                "Ult. Preço (SB1)": st.column_config.NumberColumn("Últ. Preço", format="R$ %.4f"),
+                                "Custo PC": st.column_config.NumberColumn("Custo PC", format="R$ %.4f"),
+                                "QTDE REAL": st.column_config.NumberColumn("QTDE REAL (XML)"),
+                                "Saldo Pedido (PC)": st.column_config.NumberColumn("Saldo Disp. (PC)")
+                            },
+                            disabled=["Pedido Considerado", "Produto", "Produto (SB1)", "Avisos", "FATOR CONVERSÃO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"],
+                            use_container_width=True, hide_index=True
+                        )
+                        dfs_todas_edicoes.append((filial, nf, novo_ped_nf, df_ed))
+                        
+                        colA, colB = st.columns(2)
+                        with colA:
+                            btn_salvar = st.form_submit_button(f"💾 Salvar e Recalcular NF ({nf})", use_container_width=True)
+                        with colB:
+                            btn_fin = st.form_submit_button(f"📥 Finalizar Recebimento ({nf})", type="primary", use_container_width=True)
+
+                        if btn_salvar:
+                            df_recebimentos = aplicar_salvamento(df_recebimentos, [(filial, nf, novo_ped_nf, df_ed)], df_pc, df_cad, df_barras)
+                            salvar_recebimentos_nuvem(df_recebimentos)
+                            st.rerun()
+                            
+                        if btn_fin:
+                            df_ed_fin = df_ed.copy()
+                            df_ed_fin['Finalizado'] = True
+                            df_recebimentos = aplicar_salvamento(df_recebimentos, [(filial, nf, novo_ped_nf, df_ed_fin)], df_pc, df_cad, df_barras)
+                            salvar_recebimentos_nuvem(df_recebimentos)
+                            st.rerun()
+                            
+                    # --- GERADOR DE REPORTE DE DIVERGÊNCIA P/ O SETOR DE COMPRAS ---
+                    if itens_com_divergencia:
+                        st.markdown("---")
+                        st.markdown("#### 🚨 Reporte de Divergência (Acionar Compras)")
+                        
+                        df_erros = df_nf[df_nf['Status'].apply(lambda s: str(s).strip() != "OK")].copy()
+                        
+                        lista_erros = []
+                        if df_erros['Status'].str.contains('Custo Maior').any(): lista_erros.append("Divergência de custo")
+                        if df_erros['Status'].str.contains('Saldo Insuficiente').any(): lista_erros.append("Saldo insuficiente no PC")
+                        if df_erros['Status'].str.contains('Sem Pedido').any(): lista_erros.append("Item sem pedido / PC não informado na NF")
+                        if df_erros['Status'].str.contains('Inexistente no PC').any(): lista_erros.append("Item inexistente no PC informado")
+                        if (df_erros['Código Interno'] == "").any(): lista_erros.append("EANs não cadastrados (Itens não localizados pela descrição)")
+                        
+                        pcs_nf = [str(p) for p in df_nf['Pedido Considerado'].unique() if str(p) not in ["Sem Pedido", "nan", "", "None"]]
+                        pc_str = ", ".join(pcs_nf) if pcs_nf else "Não informado"
+                        
+                        texto_padrao = f"{fornecedor} | {filial}\n\n"
+                        texto_padrao += f"NF {nf} - {tipo_nf_atual}\n"
+                        texto_padrao += f"PC {pc_str}\n\n"
+                        texto_padrao += ", ".join(lista_erros) + "\n\n"
+                        texto_padrao += "Felipe Berti Correa, por gentileza, verificar."
+                        
+                        col_txt, col_exc = st.columns([1, 1])
+                        with col_txt:
+                            st.markdown("**📝 Copie a mensagem padrão:**")
+                            st.code(texto_padrao, language="text")
+                        with col_exc:
+                            df_export_erros = pd.DataFrame({
+                                'CÓDIGO HATO': df_erros['Código Interno'],
+                                'EAN': df_erros['EAN'],
+                                'PRODUTO XML': df_erros['Produto'],
+                                'nº NF': df_erros['Nota Fiscal'],
+                                'nome fornecedor': df_erros['Fornecedor'],
+                                'filial': df_erros['Filial'],
+                                'QTDE PEDIDO (PC)': df_erros['Saldo Pedido (PC)'],
+                                'QTDE REAL (XML)': df_erros['QTDE REAL'],
+                                'CUSTO PEDIDO (PC)': df_erros['Custo PC'],
+                                'CUSTO REAL (XML)': df_erros['Custo Unitário Real'],
+                                'DIVERGÊNCIA': df_erros['Status']
+                            })
+                            output_erros = io.BytesIO()
+                            with pd.ExcelWriter(output_erros, engine='openpyxl') as writer:
+                                df_export_erros.to_excel(writer, sheet_name="Divergencias", index=False)
+                            
+                            st.write("Envie a planilha com as divergências completas:")
+                            st.download_button(f"📥 Baixar Excel ({filial} - {nf})", data=output_erros.getvalue(), file_name=f"{filial}_{nf}_Divergencias.xlsx", type="secondary", use_container_width=True)
+        
+        st.divider()
+        colA_global, colB_global = st.columns(2)
+        with colA_global:
+            if st.button("🔄 Salvar e Recalcular TODAS as Notas Acima (Apenas itens fora de formulário)", type="secondary", use_container_width=True):
+                df_recebimentos = aplicar_salvamento(df_recebimentos, dfs_todas_edicoes, df_pc, df_cad, df_barras)
+                salvar_recebimentos_nuvem(df_recebimentos)
+                st.rerun()
+        with colB_global:
+            if st.button("📥 Finalizar TODAS as Notas Acima (Apenas itens fora de formulário)", type="primary", use_container_width=True):
+                dfs_todas_edicoes_fin = []
+                for filial, nf, ped_nf, df_ed in dfs_todas_edicoes:
+                    df_ed_fin = df_ed.copy()
+                    df_ed_fin['Finalizado'] = True
+                    dfs_todas_edicoes_fin.append((filial, nf, ped_nf, df_ed_fin))
+                df_recebimentos = aplicar_salvamento(df_recebimentos, dfs_todas_edicoes_fin, df_pc, df_cad, df_barras)
+                salvar_recebimentos_nuvem(df_recebimentos)
+                st.rerun()
+    else:
+        st.info("Nenhuma nota pendente no sistema.")
+        
+# === ABA 2: FINALIZADOS / PROTHEUS ===
+with aba2:
+    df_finalizados_all = df_recebimentos[df_recebimentos['Finalizado'] == True].copy()
+    
+    if not df_finalizados_all.empty:
+        st.markdown("### 📥 Confirmação Protheus e Relatório Diário")
+        st.write("Aqui estão as notas aguardando entrada sistêmica. Clique em Confirmar Entrada para gerar a data no Relatório.")
+        
+        df_finalizados_all['Filtro Data'] = df_finalizados_all['Data Finalização'].apply(lambda x: "Aguardando Protheus" if str(x).strip() == "" else str(x).strip())
+        
+        datas_disponiveis = sorted(df_finalizados_all['Filtro Data'].unique(), reverse=True)
+        
+        colF1, colF2 = st.columns([1, 2])
+        with colF1:
+            datas_selecionadas = st.multiselect("📅 Filtrar por Data de Finalização:", options=datas_disponiveis, default=datas_disponiveis)
+            
+        st.divider()
+        
+        df_finalizados = df_finalizados_all[df_finalizados_all['Filtro Data'].isin(datas_selecionadas)]
+        
+        if not df_finalizados.empty:
+            filiais_fin = sorted(df_finalizados['Filial'].unique())
+            for filial in filiais_fin:
+                df_filial_fin = df_finalizados[df_finalizados['Filial'] == filial]
+                notas_fin = df_filial_fin['Nota Fiscal'].unique()
+                
+                for nf in notas_fin:
+                    df_nf_fin = df_filial_fin[df_filial_fin['Nota Fiscal'] == nf]
+                    fornecedor = df_nf_fin['Fornecedor'].iloc[0]
+                    v_total = float(df_nf_fin['Valor Total XML'].iloc[0])
+                    tipo_nf = df_nf_fin['Tipo NF'].iloc[0]
+                    is_confirmada = df_nf_fin['Confirmado'].all()
+                    
+                    status_fin = "🔵 [CONFIRMADO]" if is_confirmada else "⚪ [AGUARDANDO PROTHEUS]"
+                    
+                    with st.expander(f"{status_fin} 🧾 NF: {nf} ({tipo_nf}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=not is_confirmada):
+                        st.dataframe(df_nf_fin[["Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real", "Data Finalização"]], use_container_width=True, hide_index=True)
+                        
+                        hoje = datetime.datetime.now().strftime('%Y-%m-%d')
+                        colA, colB, colC = st.columns([1, 1, 1])
+                        with colA:
+                            if not is_confirmada:
+                                if st.button(f"✅ Confirmar Entrada Protheus ({nf})", key=f"btn_conf_{filial}_{nf}", type="primary", use_container_width=True):
+                                    idx_to_update = df_recebimentos[(df_recebimentos['Filial'] == filial) & (df_recebimentos['Nota Fiscal'] == nf) & (df_recebimentos['Finalizado'] == True)].index
+                                    df_recebimentos.loc[idx_to_update, 'Confirmado'] = True
+                                    df_recebimentos.loc[idx_to_update, 'Data Finalização'] = hoje
+                                    salvar_recebimentos_nuvem(df_recebimentos)
+                                    st.rerun()
+                            else:
+                                if st.button(f"↩️ Desfazer Confirmação ({nf})", key=f"btn_unconf_{filial}_{nf}", use_container_width=True):
+                                    idx_to_update = df_recebimentos[(df_recebimentos['Filial'] == filial) & (df_recebimentos['Nota Fiscal'] == nf) & (df_recebimentos['Finalizado'] == True)].index
+                                    df_recebimentos.loc[idx_to_update, 'Confirmado'] = False
+                                    df_recebimentos.loc[idx_to_update, 'Data Finalização'] = ""
+                                    salvar_recebimentos_nuvem(df_recebimentos)
+                                    st.rerun()
+                        with colC:
+                            if st.button(f"🔙 Devolver para Análise ({nf})", key=f"btn_return_{filial}_{nf}", use_container_width=True):
+                                idx_to_update = df_recebimentos[(df_recebimentos['Filial'] == filial) & (df_recebimentos['Nota Fiscal'] == nf) & (df_recebimentos['Finalizado'] == True)].index
+                                df_recebimentos.loc[idx_to_update, 'Finalizado'] = False
+                                df_recebimentos.loc[idx_to_update, 'Confirmado'] = False
+                                df_recebimentos.loc[idx_to_update, 'Data Finalização'] = ""
+                                salvar_recebimentos_nuvem(df_recebimentos)
+                                st.rerun()
+
+            st.divider()
+            df_confirmados = df_finalizados[df_finalizados['Confirmado'] == True]
+            
+            if not df_confirmados.empty:
+                st.markdown("### 📊 Exportação: Relatório Diário de Entradas")
+                relatorio_diario = []
+                for nf, group in df_confirmados.groupby("Nota Fiscal"):
+                    filial_g = group['Filial'].iloc[0]
+                    data_finalizacao = group['Data Finalização'].iloc[0]
+                    tipo = group['Tipo NF'].iloc[0]
+                    fornecedor_g = group['Fornecedor'].iloc[0]
+                    valor = float(group['Valor Total XML'].iloc[0])
+                    
+                    pedidos_nf = group['Pedido Considerado'].unique()
+                    pedidos_limpos = [str(p) for p in pedidos_nf if str(p) not in ["Sem Pedido", "nan", "", "None"]]
+                    n_pedido = ", ".join(pedidos_limpos)
+                    
+                    relatorio_diario.append({
+                        "FILIAL": filial_g,
+                        "DATA": data_finalizacao,
+                        "NF": str(nf),
+                        "TIPO": tipo,
+                        "FORNECEDOR": fornecedor_g,
+                        "N° PEDIDO": n_pedido,
+                        "VALOR": valor
+                    })
+                    
+                df_export = pd.DataFrame(relatorio_diario)
+                st.dataframe(df_export, use_container_width=True, hide_index=True)
+                
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_export.to_excel(writer, sheet_name="Relatório Diário", index=False)
+                st.download_button("📥 Baixar Relatório Diário (Excel)", data=output.getvalue(), file_name="Relatorio_Entradas_Confirmadas.xlsx", type="primary")
+            else:
+                st.info("⚠️ Nenhuma nota das datas selecionadas foi confirmada ainda.")
+                
+            st.divider()
+            with st.expander("Ver base detalhada de Finalizados (Visão Analítica para TOTVS)"):
+                st.dataframe(df_finalizados[["Filial", "Nota Fiscal", "Tipo NF", "Data Finalização", "Fornecedor", "Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real"]], use_container_width=True, hide_index=True)
+                output_det = io.BytesIO()
+                with pd.ExcelWriter(output_det, engine='openpyxl') as writer:
+                    df_finalizados.to_excel(writer, sheet_name="Itens Finalizados", index=False)
+                st.download_button("📥 Baixar Base Completa de Itens", data=output_det.getvalue(), file_name="xmls_finalizados_itens.xlsx")
+        else:
+            st.info("⚠️ Não há notas para a(s) data(s) selecionada(s).")
+    else:
+        st.info("A gaveta de notas finalizadas está vazia.")
+
+# === ABA 3: AUDITORIA PROTHEUS ===
+with aba3:
+    st.markdown("### ⚖️ Auditoria e Comparação com o Protheus")
+    st.write("Faça o upload do Excel exportado pelo TOTVS Protheus para cruzar com o que foi recebido no sistema.")
+    arquivo_prot = st.file_uploader("Upload: exp excel protheus.xlsx", type=["xlsx", "xls"])
+    
+    if arquivo_prot:
+        with st.spinner("Lendo e cruzando dados..."):
+            try:
+                df_prot = pd.read_excel(arquivo_prot)
+                header_idx = -1
+                
+                for i, r in df_prot.head(50).iterrows():
+                    row_str = " ".join([str(val).lower() for val in r.values])
+                    if "produto" in row_str and "quantidade" in row_str and "documento" in row_str:
+                        header_idx = i
+                        break
+                        
+                if header_idx != -1:
+                    df_prot.columns = df_prot.iloc[header_idx]
+                    df_prot = df_prot.iloc[header_idx+1:].reset_index(drop=True)
+                    df_prot = df_prot.loc[:, df_prot.columns.notna()]
+                    
+                    col_doc = next((c for c in df_prot.columns if 'doc' in str(c).lower() and 'orig' not in str(c).lower()), None)
+                    col_prod = next((c for c in df_prot.columns if 'prod' in str(c).lower()), None)
+                    col_qtde = next((c for c in df_prot.columns if 'quan' in str(c).lower()), None)
+                    
+                    if col_doc and col_prod and col_qtde:
+                        df_prot[col_doc] = df_prot[col_doc].astype(str).str.replace(r'\.0$', '', regex=True)
+                        df_prot[col_prod] = df_prot[col_prod].astype(str).str.strip()
+                        df_prot[col_qtde] = pd.to_numeric(df_prot[col_qtde], errors='coerce').fillna(0)
+                        
+                        df_prot_agg = df_prot.groupby([col_doc, col_prod])[col_qtde].sum().reset_index()
+                        df_prot_agg.columns = ['Nota Fiscal', 'Código Interno', 'QTDE PROTHEUS']
+                        
+                        df_rec = df_recebimentos.copy()
+                        df_rec['Nota Fiscal'] = df_rec['Nota Fiscal'].astype(str)
+                        df_rec_agg = df_rec.groupby(['Nota Fiscal', 'Código Interno'])['QTDE REAL'].sum().reset_index()
+                        
+                        df_cruzamento = pd.merge(df_rec_agg, df_prot_agg, on=['Nota Fiscal', 'Código Interno'], how='inner')
+                        df_cruzamento['Divergência'] = df_cruzamento['QTDE PROTHEUS'] - df_cruzamento['QTDE REAL']
+                        
+                        def get_status_import(val):
+                            if abs(val) < 0.01: return "🟢 Importação OK"
+                            return "🔴 Divergência"
+                            
+                        df_cruzamento['Status Importação'] = df_cruzamento['Divergência'].apply(get_status_import)
+                        st.dataframe(df_cruzamento, use_container_width=True, hide_index=True)
+                        
+                        erros = df_cruzamento[df_cruzamento['Status Importação'] == "🔴 Divergência"]
+                        if not erros.empty:
+                            st.error(f"Atenção! Encontramos {len(erros)} iten(s) com divergência de quantidade entre o XML e o Protheus.")
+                        else:
+                            st.success("Parabéns! Todas as quantidades cruzadas bateram perfeitamente.")
+                    else:
+                        st.warning("Não localizamos as colunas de Documento, Produto e Quantidade no Excel do Protheus.")
+                else:
+                    st.warning("Padrão de tabela não reconhecido no Excel enviado.")
+            except Exception as e:
+                st.error(f"Erro ao processar arquivo: {str(e)}")
