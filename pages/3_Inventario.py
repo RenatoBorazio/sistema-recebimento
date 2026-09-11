@@ -3,6 +3,7 @@ import pandas as pd
 import io
 import datetime
 import re
+from sqlalchemy import text
 
 st.set_page_config(page_title="Módulo de Inventário", page_icon="📋", layout="wide")
 
@@ -11,6 +12,15 @@ st.markdown("Cruze Contagens, Apure Divergências e Gerencie os Resultados Conso
 
 # --- CONEXÃO COM O BANCO DE DADOS NA NUVEM ---
 conn = st.connection("supabase", type="sql")
+
+def salvar_historico_nuvem(df):
+    try:
+        with conn.session as s:
+            s.execute(text("DELETE FROM historico_inventario"))
+            s.commit()
+        df.to_sql("historico_inventario", con=conn.engine, if_exists='append', index=False)
+    except:
+        df.to_sql("historico_inventario", con=conn.engine, if_exists='replace', index=False)
 
 def obter_primeira_coluna(df, nomes_possiveis):
     for nome in nomes_possiveis:
@@ -407,7 +417,7 @@ with aba1:
                 
                 df_hist_novo = pd.concat([df_hist, df_salvar], ignore_index=True)
                 
-                df_hist_novo.to_sql("historico_inventario", con=conn.engine, if_exists='replace', index=False)
+                salvar_historico_nuvem(df_hist_novo)
                 
                 st.success(f"Inventário salvo com sucesso no banco de dados corporativo (Período {periodo_input})!")
                 st.rerun()
@@ -539,6 +549,37 @@ with aba2:
                     df_detalhe_view.to_excel(writer, sheet_name="Detalhamento_por_Produto", index=False)
                     df_filtro.to_excel(writer, sheet_name="Base_Analitica_Oficial", index=False)
                 st.download_button("📥 Baixar Relatório Gerencial Completo (Excel)", data=output_gerencial.getvalue(), file_name=f"Fechamento_Inventario_{per_selecionado}.xlsx", type="primary")
+                
+                # --- NOVO: BOTÃO DE ESTORNO DE CONTAGEM ---
+                st.markdown("---")
+                with st.expander("⚠️ Zona de Perigo: Estornar / Excluir Inventário Salvo"):
+                    st.write("Use esta opção caso tenha gravado uma contagem errada e precise apagá-la do histórico (isso não afeta os arquivos no seu computador, apenas a nuvem).")
+                    
+                    df_opcoes = df_filtro[['DATA', 'FILIAL']].drop_duplicates()
+                    lista_estorno = [f"{r['DATA']} - Filial {r['FILIAL']}" for _, r in df_opcoes.iterrows()]
+                    
+                    selecao_estorno = st.multiselect(f"Selecione os inventários do {per_selecionado} que deseja estornar:", options=lista_estorno)
+                    
+                    if st.button("🗑️ Estornar Inventários Selecionados", type="primary"):
+                        if selecao_estorno:
+                            df_hist_full = carregar_historico()
+                            
+                            for item in selecao_estorno:
+                                d_str, f_str = item.split(" - Filial ")
+                                d_str = d_str.strip()
+                                f_str = f_str.strip()
+                                
+                                df_hist_full = df_hist_full[~((df_hist_full['PERIODO'].astype(str) == str(per_selecionado)) & 
+                                                              (df_hist_full['DATA'].astype(str) == d_str) & 
+                                                              (df_hist_full['FILIAL'].astype(str) == f_str))]
+                            
+                            salvar_historico_nuvem(df_hist_full)
+                                
+                            st.success("Inventário(s) estornado(s) com sucesso!")
+                            st.rerun()
+                        else:
+                            st.warning("Selecione pelo menos um item acima para estornar.")
+                # ------------------------------------------
             else:
                 st.warning("⚠️ Nenhuma data selecionada. Por favor, selecione pelo menos uma data no filtro acima para visualizar os dados.")
         else:
@@ -646,7 +687,6 @@ with aba3:
                 
                 tipo_mov_vol = "uma redução" if div_saldo < 0 else "um aumento"
                 
-                # HTML Montado de forma limpa (sem indentação fantasma)
                 h = f"<h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;'>{titulo}</h4>\n"
                 h += "<ul style='margin-top: 5px; margin-bottom: 15px;'>\n"
                 h += f"<li>Dos <b>{skus_totais}</b> SKUs inventariados, <b>{skus_div}</b> apresentaram divergências, representando aproximadamente <b>{perc_skus_div:.0f}%</b> da lista.</li>\n"
