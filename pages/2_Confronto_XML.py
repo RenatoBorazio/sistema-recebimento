@@ -737,7 +737,7 @@ if not df_recebimentos.empty:
                         
                         status_fin = "🔵 [CONFIRMADO]" if is_confirmada else "⚪ [AGUARDANDO PROTHEUS]"
                         
-                        with st.expander(f"{status_fin} 🧾 NF: {nf} ({tipo_nf}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=not is_confirmada):
+                        with st.expander(f"{status_fin} 🧾 NF: {nf} ({tipo_nf}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=False):
                             st.dataframe(df_nf_fin[["Linha", "EAN", "Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real", "Data Finalização"]], use_container_width=True, hide_index=True)
                             
                             hoje = datetime.datetime.now().strftime('%Y-%m-%d')
