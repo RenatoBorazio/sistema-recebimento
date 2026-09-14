@@ -185,6 +185,9 @@ def processar_novos_xmls(xml_files, df_existente):
             prod = det.find('nfe:prod', namespaces)
             xProd = prod.find('nfe:xProd', namespaces).text
             
+            nItem_attr = det.get('nItem')
+            linha_xml = int(nItem_attr) if nItem_attr and nItem_attr.isdigit() else i
+            
             ean_node = prod.find('nfe:cEANTrib', namespaces)
             if ean_node is None or not ean_node.text: ean_node = prod.find('nfe:cEAN', namespaces)
             ean = ean_node.text or ""
@@ -207,10 +210,10 @@ def processar_novos_xmls(xml_files, df_existente):
                 if po_num.isdigit() and len(po_num) == 5:
                     item_po = po_num
             
-            id_item = f"{nNF}_{ean_clean}_{i}_{qCom}_{vUnCom}" 
+            id_item = f"{nNF}_{ean_clean}_{linha_xml}_{qCom}_{vUnCom}" 
             
             novos_dados.append({
-                "ID": id_item, "Linha": i, "Finalizado": False, "Confirmado": False, "Duplicar": False, "Ação / Decisão": "Pendente", 
+                "ID": id_item, "Linha": linha_xml, "Finalizado": False, "Confirmado": False, "Duplicar": False, "Ação / Decisão": "Pendente", 
                 "Observações": "", "Avisos": "", "Filial": filial, "Nota Fiscal": str(nNF), "Tipo NF": tipo_nf, 
                 "Data Emissão": data_emissao, "Data Finalização": "", "Fornecedor": fornecedor, 
                 "Valor Total XML": v_total_xml, "Produto": xProd[:35], "Produto (SB1)": "", "EAN": ean_clean, 
@@ -465,7 +468,8 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                 df_base.at[real_idx, 'Observações'] = row.get('Observações', '')
                 df_base.at[real_idx, 'FATOR AJUSTADO'] = row.get('FATOR AJUSTADO', None)
                 df_base.at[real_idx, 'Pedido (Item)'] = limpar_zeros_pedido(ped_item_str)
-                df_base.at[real_idx, 'QTDE'] = row.get('QTDE', 0.0) 
+                df_base.at[real_idx, 'QTDE'] = row.get('QTDE', 0.0)
+                df_base.at[real_idx, 'Linha'] = row.get('Linha', 0)
                 
                 if row.get('Duplicar', False):
                     nova_linha = df_base.loc[real_idx].copy()
@@ -534,6 +538,12 @@ if not df_recebimentos.empty:
                 
                 for nf in notas_unicas:
                     df_nf = df_filial[df_filial['Nota Fiscal'] == nf].copy()
+                    
+                    df_nf['Linha'] = pd.to_numeric(df_nf['Linha'], errors='coerce').fillna(0).astype(int)
+                    if (df_nf['Linha'] == 0).all():
+                        df_nf['Linha'] = range(1, len(df_nf) + 1)
+                    df_nf = df_nf.sort_values(by='Linha')
+                    
                     fornecedor = df_nf['Fornecedor'].iloc[0]
                     v_total = float(df_nf['Valor Total XML'].iloc[0])
                     pedido_nf_atual = df_nf['Pedido NF'].iloc[0]
@@ -713,7 +723,13 @@ if not df_recebimentos.empty:
                     notas_fin = df_filial_fin['Nota Fiscal'].unique()
                     
                     for nf in notas_fin:
-                        df_nf_fin = df_filial_fin[df_filial_fin['Nota Fiscal'] == nf]
+                        df_nf_fin = df_filial_fin[df_filial_fin['Nota Fiscal'] == nf].copy()
+                        
+                        df_nf_fin['Linha'] = pd.to_numeric(df_nf_fin['Linha'], errors='coerce').fillna(0).astype(int)
+                        if (df_nf_fin['Linha'] == 0).all():
+                            df_nf_fin['Linha'] = range(1, len(df_nf_fin) + 1)
+                        df_nf_fin = df_nf_fin.sort_values(by='Linha')
+                        
                         fornecedor = df_nf_fin['Fornecedor'].iloc[0]
                         v_total = float(df_nf_fin['Valor Total XML'].iloc[0])
                         tipo_nf = df_nf_fin['Tipo NF'].iloc[0]
