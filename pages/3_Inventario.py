@@ -72,7 +72,7 @@ try:
         c_custo = obter_primeira_coluna(df_est_raw, ['CUSTO UNITARIO', 'CUSTO UNITÁRIO', 'CUSTO', 'CM1', 'B2_CM1', 'CUSTO MEDIO', 'CUSTO MÉDIO', 'VALOR UNITARIO', 'VALOR UNITÁRIO'])
         
         if not c_saldo or not c_prod:
-            st.warning("⚠️ **Aviso de Diagnóstico:** O sistema carregou o seu arquivo de Estoque Inicial, mas não identificou as colunas de **Produto** ou **Saldo**. O cálculo pode dar Zero. Por favor, abra o seu Excel de estoque, renomeie os títulos das colunas para 'PRODUTO' e 'SALDO', e suba novamente na Central de Bases.")
+            st.warning("⚠️ *Aviso de Diagnóstico:* O sistema carregou o seu arquivo de Estoque Inicial, mas não identificou as colunas de *Produto* ou *Saldo*. O cálculo pode dar Zero. Por favor, abra o seu Excel de estoque, renomeie os títulos das colunas para 'PRODUTO' e 'SALDO', e suba novamente na Central de Bases.")
 
         df_est = pd.DataFrame()
         df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
@@ -234,6 +234,9 @@ def processar_contagem(df_contagem):
                 custo_unitario = float(m_cad_custo['CUSTO STAND'].iloc[0])
             
         valor_inicial = saldo_inicial * custo_unitario
+        
+        divergencia_c1 = contagem_1 - saldo_inicial
+        
         divergencia_saldo = contagem_final - saldo_inicial
         divergencia_valor = divergencia_saldo * custo_unitario
         
@@ -244,20 +247,21 @@ def processar_contagem(df_contagem):
             "FILIAL": filial,
             "ARMAZEM": armazem,
             "INFORMAR CODIGO": codigo_informado,
-            "CONTAGEM 1": contagem_1,
-            "CONTAGEM 2": contagem_2 if is_recontado else None,
-            "CONTAGEM FINAL": contagem_final,
             "CODIGO INTERNO": cod_interno,
             "EAN OFICIAL (SB1)": ean_oficial_sb1,
             "DISPONIVEL PARA INVENTARIO?": disponivel,
             "DESCRIÇÃO": descricao,
             "SALDO INICIAL": saldo_inicial,
-            "VALOR INICIAL": round(valor_inicial, 2),
             "CUSTO UNITARIO": round(custo_unitario, 4),
+            "VALOR INICIAL": round(valor_inicial, 2),
             "DIVERGENCIA DE SALDO": divergencia_saldo,
             "DIVERGENCIA DE VALOR": round(divergencia_valor, 2),
             "%DIV QTDE": perc_div_qtde,
-            "%DIV VALOR": perc_div_valor
+            "%DIV VALOR": perc_div_valor,
+            "CONTAGEM 1": contagem_1,
+            "DIV. 1ª CONTAGEM": divergencia_c1,
+            "CONTAGEM 2": contagem_2 if is_recontado else None,
+            "CONTAGEM FINAL": contagem_final
         })
         
     return pd.DataFrame(resultados)
@@ -326,7 +330,7 @@ with aba1:
             div_rs = df_filial['DIVERGENCIA DE VALOR'].sum()
             div_pcs = df_filial['DIVERGENCIA DE SALDO'].sum()
             
-            st.markdown(f"<h3 style='color: #2e7bcf;'>🏢 Filial: {filial}</h3>", unsafe_allow_html=True)
+            st.subheader(f"🏢 Filial: {filial}")
             
             with st.expander(f"📊 Ver Detalhes da Contagem | Divergência: R$ {div_rs:,.2f} ({div_pcs} un)", expanded=True):
                 st.dataframe(df_filial_view.drop(columns=['EAN OFICIAL (SB1)', 'FILIAL']), use_container_width=True, hide_index=True)
@@ -336,17 +340,15 @@ with aba1:
                 col_btn1, col_btn2 = st.columns([1, 1])
                 with col_btn1:
                     if not df_recontagem.empty:
-                        # Formulário de recontagem:
-                        # mantém a 1ª contagem (saldo efetivamente contado)
-                        # e deixa a 2ª contagem em branco para preenchimento.
                         df_export_rec = pd.DataFrame({
                             'FILIAL': df_recontagem['FILIAL'],
                             'ARMAZEM': df_recontagem['ARMAZEM'],
                             'CODIGO INTERNO': df_recontagem['CODIGO INTERNO'],
-                            'EAN': df_recontagem['EAN OFICIAL (SB1)'],
+                            'EAN': df_recontagem['EAN OFICIAL (SB1)'], 
                             'DESCRIÇÃO': df_recontagem['DESCRIÇÃO'],
                             '1ª Contagem': df_recontagem['CONTAGEM 1'],
-                            '2ª Contagem': "",
+                            'Div. 1ª Contagem': df_recontagem['DIV. 1ª CONTAGEM'],
+                            '2ª Contagem': "", 
                             '% DIV QTDE': (df_recontagem['%DIV QTDE'] * 100).map("{:.2f}%".format),
                             '% DIV VALOR': (df_recontagem['%DIV VALOR'] * 100).map("{:.2f}%".format)
                         })
@@ -366,7 +368,9 @@ with aba1:
                         st.success("🎉 Não há divergências nesta filial! Nenhuma recontagem necessária.")
                         
                 with col_btn2:
-                    df_protheus_source = df_filial[df_filial['DISPONIVEL PARA INVENTARIO?'] == 'SIM']
+                    # NOVA REGRA: Apenas itens disponíveis e COM divergência vão para o Protheus!
+                    df_protheus_source = df_filial[(df_filial['DISPONIVEL PARA INVENTARIO?'] == 'SIM') & (df_filial['DIVERGENCIA DE SALDO'] != 0)]
+                    
                     if not df_protheus_source.empty:
                         df_protheus = pd.DataFrame({
                             'B7_FILIAL': df_protheus_source['FILIAL'],
@@ -386,6 +390,8 @@ with aba1:
                             use_container_width=True,
                             key=f"btn_prot_{filial}"
                         )
+                    else:
+                        st.success("🟢 100% Batido! Não há divergências para exportar ao Protheus.")
                         
         st.divider()
         st.markdown("### 💾 Ações Globais")
@@ -554,7 +560,6 @@ with aba2:
                     df_filtro.to_excel(writer, sheet_name="Base_Analitica_Oficial", index=False)
                 st.download_button("📥 Baixar Relatório Gerencial Completo (Excel)", data=output_gerencial.getvalue(), file_name=f"Fechamento_Inventario_{per_selecionado}.xlsx", type="primary")
                 
-                # --- NOVO: BOTÃO DE ESTORNO DE CONTAGEM ---
                 st.markdown("---")
                 with st.expander("⚠️ Zona de Perigo: Estornar / Excluir Inventário Salvo"):
                     st.write("Use esta opção caso tenha gravado uma contagem errada e precise apagá-la do histórico (isso não afeta os arquivos no seu computador, apenas a nuvem).")
@@ -583,7 +588,6 @@ with aba2:
                             st.rerun()
                         else:
                             st.warning("Selecione pelo menos um item acima para estornar.")
-                # ------------------------------------------
             else:
                 st.warning("⚠️ Nenhuma data selecionada. Por favor, selecione pelo menos uma data no filtro acima para visualizar os dados.")
         else:
@@ -657,9 +661,8 @@ with aba3:
             
             st.markdown("---")
             st.markdown("#### 📧 E-mail Executivo Gerado")
-            st.info("💡 Arraste o mouse sobre o quadro tracejado abaixo, aperte **Ctrl+C** e cole direto no corpo do seu Outlook! Os cálculos são automáticos baseados na semana selecionada.")
+            st.info("💡 Arraste o mouse sobre o quadro tracejado abaixo, aperte *Ctrl+C* e cole direto no corpo do seu Outlook! Os cálculos são automáticos baseados na semana selecionada.")
             
-            # --- MOTOR GERADOR DE TEXTO DE INDICADORES ---
             df_email = df_hist_limpo[df_hist_limpo['DATA'].isin([d.strftime('%Y-%m-%d') for d in dates])].copy()
             for c in ['VALOR INICIAL', 'SALDO INICIAL', 'DIVERGENCIA DE SALDO', 'DIVERGENCIA DE VALOR', 'CONTAGEM FINAL']:
                 if c in df_email.columns:
@@ -720,7 +723,6 @@ with aba3:
                         indicadores_html += gerar_texto_indicadores(df_fil, f"Resultado: {nome_filial}")
                 indicadores_html += "</div>\n"
             
-            # --- CONSTRUÇÃO DO HTML FINAL SEM INDENTAÇÃO ---
             html_cal = '<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 15px; border: 2px dashed #999; border-radius: 5px;">\n'
             html_cal += '<p>Boa tarde!</p>\n'
             html_cal += '<p>Segue o resumo <span style="background-color: #ffff00; font-weight: bold;">semanal</span> dos inventários.</p>\n'
