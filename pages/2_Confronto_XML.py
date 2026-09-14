@@ -121,7 +121,7 @@ def carregar_recebimentos():
             "Pedido NF": "", "Tipo NF": "N/D", "Data Emissão": "", "Data Finalização": "", "FATOR AJUSTADO": None, 
             "QTDE": 0.0, "FATOR CONVERSÃO": 1, "QTDE REAL": 0.0, "Custo Unitário Real": 0.0, "Ult. Preço (SB1)": 0.0, 
             "Variação Custo (%)": 0.0, "Código Interno": "", "Pedido (Item)": "", "Saldo Pedido (PC)": 0.0, 
-            "Custo PC": 0.0, "Produto (SB1)": "", "Avisos": ""
+            "Custo PC": 0.0, "Produto (SB1)": "", "Avisos": "", "Linha": 0
         }
         for col, val in colunas_novas.items():
             if col not in df.columns: df[col] = val
@@ -181,7 +181,7 @@ def processar_novos_xmls(xml_files, df_existente):
         match = re.search(r'(?:pedido|ped)\b[^\d]*0*(\d{5})\b', infCpl.text if infCpl is not None else "", re.IGNORECASE)
         pedido_global = match.group(1) if match else ""
         
-        for i, det in enumerate(infNFe.findall('.//nfe:det', namespaces)):
+        for i, det in enumerate(infNFe.findall('.//nfe:det', namespaces), start=1):
             prod = det.find('nfe:prod', namespaces)
             xProd = prod.find('nfe:xProd', namespaces).text
             
@@ -210,7 +210,7 @@ def processar_novos_xmls(xml_files, df_existente):
             id_item = f"{nNF}_{ean_clean}_{i}_{qCom}_{vUnCom}" 
             
             novos_dados.append({
-                "ID": id_item, "Finalizado": False, "Confirmado": False, "Duplicar": False, "Ação / Decisão": "Pendente", 
+                "ID": id_item, "Linha": i, "Finalizado": False, "Confirmado": False, "Duplicar": False, "Ação / Decisão": "Pendente", 
                 "Observações": "", "Avisos": "", "Filial": filial, "Nota Fiscal": str(nNF), "Tipo NF": tipo_nf, 
                 "Data Emissão": data_emissao, "Data Finalização": "", "Fornecedor": fornecedor, 
                 "Valor Total XML": v_total_xml, "Produto": xProd[:35], "Produto (SB1)": "", "EAN": ean_clean, 
@@ -230,6 +230,7 @@ def processar_novos_xmls(xml_files, df_existente):
             return pd.concat([df_existente, df_novos]).drop_duplicates(subset=['ID'], keep='last')
         return df_novos
     return df_existente
+
 def recalcular_pendentes(df):
     if df.empty: return df
     pc_pedidos_list = df_pc['Numero PC'].astype(str).unique()
@@ -450,6 +451,7 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                         nova_linha['Observações'] = row.get('Observações', '')
                         nova_linha['FATOR AJUSTADO'] = row.get('FATOR AJUSTADO', None)
                         nova_linha['Duplicar'] = False
+                        nova_linha['Linha'] = row.get('Linha', 0)
                         novas_linhas.append(nova_linha)
             else:
                 df_base.at[real_idx, 'Pedido NF'] = limpar_zeros_pedido(ped_nf_str) if not ',' in ped_nf_str else ""
@@ -479,7 +481,8 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
     if novas_linhas: df_base = pd.concat([df_base, pd.DataFrame(novas_linhas)], ignore_index=True)
         
     return df_base
-    # --- INTERFACE ---
+
+# --- INTERFACE ---
 df_recebimentos = carregar_recebimentos()
 
 with st.sidebar:
@@ -524,8 +527,6 @@ if not df_recebimentos.empty:
             
             for filial in filiais_unicas:
                 nome_filial = filial if filial not in ["N/D", "nan", "", "None"] else "Filial Não Identificada"
-                
-                # Substituído HTML cru por subheader nativo para não quebrar a cópia!
                 st.subheader(f"🏢 Filial: {nome_filial}")
                 
                 df_filial = df_pendentes[df_pendentes['Filial'] == filial]
@@ -557,8 +558,8 @@ if not df_recebimentos.empty:
                                 novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual)
                             
                             cols_view = [
-                                "Duplicar", "Ação / Decisão", "Avisos", "Observações", "Pedido Considerado",
-                                "Pedido (Item)", "Código Interno", "Produto", "Produto (SB1)", "QTDE", "FATOR CONVERSÃO", 
+                                "Duplicar", "Ação / Decisão", "Linha", "EAN", "Código Interno", "Avisos", "Observações", "Pedido Considerado",
+                                "Pedido (Item)", "Produto", "Produto (SB1)", "QTDE", "FATOR CONVERSÃO", 
                                 "FATOR AJUSTADO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", 
                                 "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"
                             ]
@@ -569,6 +570,8 @@ if not df_recebimentos.empty:
                                 column_config={
                                     "Duplicar": st.column_config.CheckboxColumn("Duplicar ➕"),
                                     "Ação / Decisão": st.column_config.SelectboxColumn("Decisão", options=["Pendente", "Liberar Entrada", "Aguardar Correção", "Ajustar Pedido"]),
+                                    "Linha": st.column_config.NumberColumn("Linha XML", format="%d"),
+                                    "EAN": st.column_config.TextColumn("EAN XML"),
                                     "Pedido Considerado": st.column_config.TextColumn("Pedido Considerado"),
                                     "Pedido (Item)": st.column_config.TextColumn("Pedido Específico (Item)", help="Vírgulas aqui quebram APENAS esta linha."),
                                     "Código Interno": st.column_config.TextColumn("Código Interno ✏️", help="Editável. Digite o código caso não tenha sido localizado automaticamente."),
@@ -584,7 +587,7 @@ if not df_recebimentos.empty:
                                     "QTDE REAL": st.column_config.NumberColumn("QTDE REAL (XML)"),
                                     "Saldo Pedido (PC)": st.column_config.NumberColumn("Saldo Disp. (PC)")
                                 },
-                                disabled=["Pedido Considerado", "Produto", "Produto (SB1)", "Avisos", "FATOR CONVERSÃO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"],
+                                disabled=["Linha", "EAN", "Pedido Considerado", "Produto", "Produto (SB1)", "Avisos", "FATOR CONVERSÃO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"],
                                 use_container_width=True, hide_index=True
                             )
                             dfs_todas_edicoes.append((filial, nf, novo_ped_nf, df_ed))
@@ -635,6 +638,7 @@ if not df_recebimentos.empty:
                                 st.code(texto_padrao, language="text")
                             with col_exc:
                                 df_export_erros = pd.DataFrame({
+                                    'LINHA XML': df_erros['Linha'],
                                     'CÓDIGO HATO': df_erros['Código Interno'],
                                     'EAN': df_erros['EAN'],
                                     'PRODUTO XML': df_erros['Produto'],
@@ -686,17 +690,25 @@ if not df_recebimentos.empty:
             
             datas_disponiveis = sorted(df_finalizados_all['Filtro Data'].unique(), reverse=True)
             
-            colF1, colF2 = st.columns([1, 2])
+            colF1, colF2 = st.columns([1, 1])
             with colF1:
                 datas_selecionadas = st.multiselect("📅 Filtrar por Data de Finalização:", options=datas_disponiveis, default=datas_disponiveis)
+            with colF2:
+                busca_nf = st.text_input("🔍 Pesquisar por Número da NF:")
                 
             st.divider()
             
             df_finalizados = df_finalizados_all[df_finalizados_all['Filtro Data'].isin(datas_selecionadas)]
             
+            if busca_nf:
+                df_finalizados = df_finalizados[df_finalizados['Nota Fiscal'].astype(str).str.contains(busca_nf.strip(), case=False, na=False)]
+            
             if not df_finalizados.empty:
                 filiais_fin = sorted(df_finalizados['Filial'].unique())
                 for filial in filiais_fin:
+                    nome_filial = filial if filial not in ["N/D", "nan", "", "None"] else "Filial Não Identificada"
+                    st.subheader(f"🏢 Filial: {nome_filial}")
+                    
                     df_filial_fin = df_finalizados[df_finalizados['Filial'] == filial]
                     notas_fin = df_filial_fin['Nota Fiscal'].unique()
                     
@@ -710,7 +722,7 @@ if not df_recebimentos.empty:
                         status_fin = "🔵 [CONFIRMADO]" if is_confirmada else "⚪ [AGUARDANDO PROTHEUS]"
                         
                         with st.expander(f"{status_fin} 🧾 NF: {nf} ({tipo_nf}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=not is_confirmada):
-                            st.dataframe(df_nf_fin[["Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real", "Data Finalização"]], use_container_width=True, hide_index=True)
+                            st.dataframe(df_nf_fin[["Linha", "EAN", "Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real", "Data Finalização"]], use_container_width=True, hide_index=True)
                             
                             hoje = datetime.datetime.now().strftime('%Y-%m-%d')
                             colA, colB, colC = st.columns([1, 1, 1])
@@ -777,13 +789,13 @@ if not df_recebimentos.empty:
                     
                 st.divider()
                 with st.expander("Ver base detalhada de Finalizados (Visão Analítica para TOTVS)"):
-                    st.dataframe(df_finalizados[["Filial", "Nota Fiscal", "Tipo NF", "Data Finalização", "Fornecedor", "Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real"]], use_container_width=True, hide_index=True)
+                    st.dataframe(df_finalizados[["Filial", "Nota Fiscal", "Tipo NF", "Data Finalização", "Fornecedor", "Linha", "EAN", "Pedido Considerado", "Código Interno", "Produto", "Produto (SB1)", "QTDE REAL", "Custo Unitário Real"]], use_container_width=True, hide_index=True)
                     output_det = io.BytesIO()
                     with pd.ExcelWriter(output_det, engine='openpyxl') as writer:
                         df_finalizados.to_excel(writer, sheet_name="Itens Finalizados", index=False)
                     st.download_button("📥 Baixar Base Completa de Itens", data=output_det.getvalue(), file_name="xmls_finalizados_itens.xlsx")
             else:
-                st.info("⚠️ Não há notas para a(s) data(s) selecionada(s).")
+                st.info("⚠️ Não há notas que correspondam aos filtros selecionados.")
         else:
             st.info("A gaveta de notas finalizadas está vazia.")
 
