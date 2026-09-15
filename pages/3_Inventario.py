@@ -44,9 +44,9 @@ try:
         c_custo_st = obter_primeira_coluna(df_cad_raw, ['CUSTO STAND', 'CUSTO STAND.', 'ULT. PRECO', 'ULTIMO PRECO', 'PRECO VENDA'])
         
         df_cad = pd.DataFrame()
-        df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
-        df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
-        df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', '<NA>'], '').str.strip() if c_desc else ""
+        df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
+        df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
+        df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', ''], '').str.strip() if c_desc else ""
         df_cad['CUSTO STAND'] = safe_numeric(df_cad_raw[c_custo_st]) if c_custo_st else 0.0
     else:
         df_cad = pd.DataFrame()
@@ -75,9 +75,9 @@ try:
             st.warning("⚠️ *Aviso de Diagnóstico:* O sistema carregou o seu arquivo de Estoque Inicial, mas não identificou as colunas de *Produto* ou *Saldo*. O cálculo pode dar Zero. Por favor, abra o seu Excel de estoque, renomeie os títulos das colunas para 'PRODUTO' e 'SALDO', e suba novamente na Central de Bases.")
 
         df_est = pd.DataFrame()
-        df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
-        df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
-        df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
+        df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
+        df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
+        df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
         df_est['Saldo Inicial'] = safe_numeric(df_est_raw[c_saldo]) if c_saldo else 0.0
         df_est['Custo Unitario'] = safe_numeric(df_est_raw[c_custo]) if c_custo else 0.0
     else:
@@ -94,25 +94,30 @@ try:
         c_prod_sd1 = obter_primeira_coluna(df_sd1_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'D1_COD'])
         
         df_sd1 = pd.DataFrame()
-        df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
-        df_sd1['Produto'] = df_sd1_raw[c_prod_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod_sd1 else ""
+        df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
+        df_sd1['Produto'] = df_sd1_raw[c_prod_sd1].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod_sd1 else ""
     else:
         df_sd1 = pd.DataFrame()
 except:
     df_sd1 = pd.DataFrame()
 
-# --- Nova Base Curva ABC ---
+# --- Nova Base Curva ABC (Com suporte a Filial) ---
 try:
     df_curva_raw = conn.query("SELECT * FROM base_curva_abc", ttl=0).astype(str)
     if not df_curva_raw.empty:
         df_curva_raw.columns = [str(c).upper().strip() for c in df_curva_raw.columns]
         c_cod_curva = obter_primeira_coluna(df_curva_raw, ['CODIGO', 'CÓDIGO', 'PRODUTO', 'CÓDIGO INTERNO'])
         c_curva = obter_primeira_coluna(df_curva_raw, ['CURVA', 'CURVA ABC'])
+        c_filial_curva = obter_primeira_coluna(df_curva_raw, ['FILIAL', 'LOJA'])
         
         df_curva = pd.DataFrame()
         if c_cod_curva and c_curva:
             df_curva['CODIGO'] = df_curva_raw[c_cod_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip()
             df_curva['CURVA'] = df_curva_raw[c_curva].astype(str).str.strip().str.upper()
+            if c_filial_curva:
+                df_curva['FILIAL'] = df_curva_raw[c_filial_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip()
+            else:
+                df_curva['FILIAL'] = ""
     else:
         df_curva = pd.DataFrame()
 except:
@@ -227,12 +232,18 @@ def processar_contagem(df_contagem):
         if not cod_interno: cod_interno = codigo_informado 
         if not ean_oficial_sb1: ean_oficial_sb1 = codigo_informado 
 
-        # --- BUSCANDO A CURVA ABC ---
-        curva_abc = "-"
-        if not df_curva.empty and cod_interno:
-            m_curva = df_curva[df_curva['CODIGO'] == cod_interno]
+        # --- BUSCANDO A CURVA ABC POR FILIAL ---
+        curva_abc = "C" # Padrão é C
+        if cod_interno and not df_curva.empty and 'CODIGO' in df_curva.columns:
+            if 'FILIAL' in df_curva.columns and not df_curva['FILIAL'].eq("").all():
+                m_curva = df_curva[(df_curva['CODIGO'] == cod_interno) & (df_curva['FILIAL'] == filial)]
+            else:
+                m_curva = df_curva[df_curva['CODIGO'] == cod_interno]
+                
             if not m_curva.empty:
-                curva_abc = str(m_curva['CURVA'].iloc[0]).strip()
+                curva_val = str(m_curva['CURVA'].iloc[0]).strip().upper()
+                if curva_val in ['A', 'B', 'C']:
+                    curva_abc = curva_val
             
         disponivel = "SIM"
         if not df_sd1.empty:
@@ -518,7 +529,7 @@ with aba2:
                             "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                            "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. VALOR R\(": f"R\) {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
                         
@@ -542,7 +553,7 @@ with aba2:
                             "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                            "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. VALOR R\(": f"R\) {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
                         
@@ -697,9 +708,6 @@ with aba3:
                 s = f"{val:,.2f}" if is_currency else f"{val:,.0f}"
                 return s.replace(',', 'X').replace('.', ',').replace('X', '.')
             
-            LT = chr(60)
-            GT = chr(62)
-            
             def gerar_texto_indicadores(df_subset, titulo):
                 if df_subset.empty: return ""
                 
@@ -722,53 +730,54 @@ with aba3:
                 
                 tipo_mov_vol = "uma redução" if div_saldo < 0 else "um aumento"
                 
-                h = f"{LT}h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;'{GT}{titulo}{LT}/h4{GT}\n"
-                h += f"{LT}ul style='margin-top: 5px; margin-bottom: 15px;'{GT}\n"
-                h += f"{LT}li{GT}Dos {LT}b{GT}{skus_totais}{LT}/b{GT} SKUs inventariados, {LT}b{GT}{skus_div}{LT}/b{GT} apresentaram divergências, representando aproximadamente {LT}b{GT}{perc_skus_div:.0f}%{LT}/b{GT} da lista.{LT}/li{GT}\n"
+                h = f"[[h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;']]{titulo}[[/h4]]\n"
+                h += "[[ul style='margin-top: 5px; margin-bottom: 15px;']]\n"
+                h += f"[[li]]Dos [[b]]{skus_totais}[[/b]] SKUs inventariados, [[b]]{skus_div}[[/b]] apresentaram divergências, representando aproximadamente [[b]]{perc_skus_div:.0f}%[[/b]] da lista.[[/li]]\n"
                 
                 if round(div_valor, 2) != 0:
-                    h += f"{LT}li{GT}Foi identificada {tipo_mov_valor} de inventário no valor de {LT}b{GT}R$ {fmt_br(abs(div_valor), True)}{LT}/b{GT}, {tipo_mov_estoque} o estoque de R$ {fmt_br(valor_inicial, True)} para R$ {fmt_br(valor_final, True)}, o que representa uma {tipo_baixa_alta} de {LT}b{GT}{perc_div_valor:.0f}%{LT}/b{GT}.{LT}/li{GT}\n"
+                    h += f"[[li]]Foi identificada {tipo_mov_valor} de inventário no valor de [[b]]R$ {fmt_br(abs(div_valor), True)}[[/b]], {tipo_mov_estoque} o estoque de R$ {fmt_br(valor_inicial, True)} para R$ {fmt_br(valor_final, True)}, o que representa uma {tipo_baixa_alta} de [[b]]{perc_div_valor:.0f}%[[/b]].[[/li]]\n"
                 else:
-                    h += f"{LT}li{GT}O valor do estoque se manteve em R$ {fmt_br(valor_inicial, True)}, sem perdas ou ganhos financeiros.{LT}/li{GT}\n"
+                    h += f"[[li]]O valor do estoque se manteve em R$ {fmt_br(valor_inicial, True)}, sem perdas ou ganhos financeiros.[[/li]]\n"
                     
                 if round(div_saldo, 0) != 0:
-                    h += f"{LT}li{GT}Em volume, houve {tipo_mov_vol} de {LT}b{GT}{fmt_br(abs(div_saldo))}{LT}/b{GT} unidades, fazendo o estoque passar de {fmt_br(saldo_inicial)} para {fmt_br(saldo_final)} unidades.{LT}/li{GT}\n"
+                    h += f"[[li]]Em volume, houve {tipo_mov_vol} de [[b]]{fmt_br(abs(div_saldo))}[[/b]] unidades, fazendo o estoque passar de {fmt_br(saldo_inicial)} para {fmt_br(saldo_final)} unidades.[[/li]]\n"
                 else:
-                    h += f"{LT}li{GT}Em volume, o estoque geral de {fmt_br(saldo_inicial)} unidades foi mantido.{LT}/li{GT}\n"
+                    h += f"[[li]]Em volume, o estoque geral de {fmt_br(saldo_inicial)} unidades foi mantido.[[/li]]\n"
                     
-                h += f"{LT}/ul{GT}\n"
-                return h
+                h += "[[/ul]]\n"
+                return h.replace("[[", "<").replace("]]", ">")
 
             indicadores_html = ""
             if not df_email.empty:
-                indicadores_html += f"{LT}div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #2e7bcf; margin: 20px 0;'{GT}\n"
-                indicadores_html += f"{LT}h3 style='color: #2e7bcf; margin-bottom: 10px; margin-top: 0;'{GT}📊 Resumo de Indicadores da Semana{LT}/h3{GT}\n"
+                indicadores_html += "[[div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #2e7bcf; margin: 20px 0;']]\n"
+                indicadores_html += "[[h3 style='color: #2e7bcf; margin-bottom: 10px; margin-top: 0;']]📊 Resumo de Indicadores da Semana[[/h3]]\n"
                 indicadores_html += gerar_texto_indicadores(df_email, "Consolidado Geral (Todas as Filiais)")
                 for f_code in filiais_unicas:
                     df_fil = df_email[df_email['FILIAL'] == f_code]
                     if not df_fil.empty:
                         nome_filial = filiais_map.get(f_code, f"FILIAL {f_code}")
                         indicadores_html += gerar_texto_indicadores(df_fil, f"Resultado: {nome_filial}")
-                indicadores_html += f"{LT}/div{GT}\n"
+                indicadores_html += "[[/div]]\n"
+                indicadores_html = indicadores_html.replace("[[", "<").replace("]]", ">")
             
-            html_cal = f"{LT}meta charset='UTF-8'{GT}\n"
-            html_cal += f"{LT}div style='font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 15px; border: 2px dashed #999; border-radius: 5px; max-width: 800px; margin: auto;'{GT}\n"
-            html_cal += f"{LT}p{GT}Boa tarde!{LT}/p{GT}\n"
-            html_cal += f"{LT}p{GT}Segue o resumo {LT}span style='background-color: #ffff00; font-weight: bold;'{GT}semanal{LT}/span{GT} dos inventários.{LT}/p{GT}\n"
-            html_cal += f"{LT}p{GT}{LT}b{GT}Em anexo, seguem todos os itens ajustados da semana.{LT}/b{GT}{LT}/p{GT}\n"
-            html_cal += f"{LT}p{GT}Os ajustes são realizados após o envio da recontagem. Conforme alinhado, caso a contagem ou a recontagem não seja realizada, solicitamos o envio da justificativa correspondente.{LT}/p{GT}\n"
+            html_cal = '[[meta charset="UTF-8"]]\n' 
+            html_cal += '[[div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 15px; border: 2px dashed #999; border-radius: 5px; max-width: 800px; margin: auto;"]]\n'
+            html_cal += '[[p]]Boa tarde![[/p]]\n'
+            html_cal += '[[p]]Segue o resumo [[span style="background-color: #ffff00; font-weight: bold;"]]semanal[[/span]] dos inventários.[[/p]]\n'
+            html_cal += '[[p]][[b]]Em anexo, seguem todos os itens ajustados da semana.[[/b]][[/p]]\n'
+            html_cal += '[[p]]Os ajustes são realizados após o envio da recontagem. Conforme alinhado, caso a contagem ou a recontagem não seja realizada, solicitamos o envio da justificativa correspondente.[[/p]]\n'
             html_cal += indicadores_html
-            html_cal += f"{LT}p{GT}Calendário de contagens e recontagens por filial:{LT}/p{GT}\n"
-            html_cal += f"{LT}table style='border-collapse: collapse; text-align: center; margin-top: 15px;'{GT}\n"
-            html_cal += f"{LT}tr{GT}{LT}th style='border: none;'{GT}{LT}/th{GT}\n"
+            html_cal += '[[p]]Calendário de contagens e recontagens por filial:[[/p]]\n'
+            html_cal += '[[table style="border-collapse: collapse; text-align: center; margin-top: 15px;"]]\n'
+            html_cal += '[[tr]][[th style="border: none;"]][[/th]]\n'
             
             for d in dates:
-                html_cal += f"{LT}th colspan='2' style='border: 1px solid #ccc; padding: 8px 15px; background-color: #f2f2f2; font-size: 16px;'{GT}{d.day}{LT}/th{GT}\n"
-            html_cal += f"{LT}/tr{GT}\n"
+                html_cal += f'[[th colspan="2" style="border: 1px solid #ccc; padding: 8px 15px; background-color: #f2f2f2; font-size: 16px;"]]{d.day}[[/th]]\n'
+            html_cal += '[[/tr]]\n'
             
             for idx, row in df_grid.iterrows():
                 f_name = row['Filial']
-                html_cal += f"{LT}tr{GT}{LT}td style='border: none; padding: 10px 15px; text-align: right; font-weight: bold; color: #555;'{GT}{f_name}{LT}/td{GT}\n"
+                html_cal += f'[[tr]][[td style="border: none; padding: 10px 15px; text-align: right; font-weight: bold; color: #555;"]]{f_name}[[/td]]\n'
                 for d in dates:
                     d_label = d.strftime('%d/%m')
                     status = row[d_label]
@@ -778,18 +787,20 @@ with aba3:
                         cor_bg, cor_texto = '#f4b084', '#333'
                     else:
                         cor_bg, cor_texto = '#ffffff', '#999'
-                    html_cal += f"{LT}td style='border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;'{GT}contagem{LT}/td{GT}\n"
-                    html_cal += f"{LT}td style='border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;'{GT}recontagem{LT}/td{GT}\n"
-                html_cal += f"{LT}/tr{GT}\n"
+                    html_cal += f'[[td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;"]]contagem[[/td]]\n'
+                    html_cal += f'[[td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;"]]recontagem[[/td]]\n'
+                html_cal += '[[/tr]]\n'
                 
-            html_cal += f"{LT}/table{GT}{LT}br{GT}\n"
-            html_cal += f"{LT}table style='border-collapse: collapse; text-align: center; font-family: Arial, sans-serif; font-size: 12px; font-weight: bold;'{GT}\n"
-            html_cal += f"{LT}tr{GT}{LT}td style='border: 1px solid #000; padding: 3px 20px;'{GT}LEGENDA{LT}/td{GT}{LT}/tr{GT}\n"
-            html_cal += f"{LT}tr{GT}{LT}td style='border: 1px solid #000; padding: 3px 20px; background-color: #f4b084;'{GT}NÃO INVENTARIADO{LT}/td{GT}{LT}/tr{GT}\n"
-            html_cal += f"{LT}tr{GT}{LT}td style='border: 1px solid #000; padding: 3px 20px; background-color: #a9d08e;'{GT}INVENTARIADO - OK{LT}/td{GT}{LT}/tr{GT}\n"
-            html_cal += f"{LT}/table{GT}\n"
-            html_cal += f"{LT}p{GT}Atenciosamente.{LT}/p{GT}\n"
-            html_cal += f"{LT}/div{GT}\n"
+            html_cal += '[[/table]][[br]]\n'
+            html_cal += '[[table style="border-collapse: collapse; text-align: center; font-family: Arial, sans-serif; font-size: 12px; font-weight: bold;"]]\n'
+            html_cal += '[[tr]][[td style="border: 1px solid #000; padding: 3px 20px;"]]LEGENDA[[/td]][[/tr]]\n'
+            html_cal += '[[tr]][[td style="border: 1px solid #000; padding: 3px 20px; background-color: #f4b084;"]]NÃO INVENTARIADO[[/td]][[/tr]]\n'
+            html_cal += '[[tr]][[td style="border: 1px solid #000; padding: 3px 20px; background-color: #a9d08e;"]]INVENTARIADO - OK[[/td]][[/tr]]\n'
+            html_cal += '[[/table]]\n'
+            html_cal += '[[p]]Atenciosamente.[[/p]]\n'
+            html_cal += '[[/div]]\n'
+            
+            html_cal = html_cal.replace("[[", "<").replace("]]", ">")
             
             # --- O BOTÃO SEGURO DE DOWNLOAD DO HTML ---
             st.download_button(
