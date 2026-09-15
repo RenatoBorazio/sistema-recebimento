@@ -122,9 +122,33 @@ def carregar_bases():
     except Exception as e:
         df_curva = pd.DataFrame()
         
-    return df_cad, df_pc, df_barras, df_curva
+    # --- Nova Base Estoque Inicial (Para Ruptura) ---
+    try:
+        df_est_raw = conn.query("SELECT * FROM estoque_inicial", ttl=0).astype(str)
+        if not df_est_raw.empty:
+            df_est_raw.columns = [str(c).upper().strip() for c in df_est_raw.columns]
+            c_filial = obter_primeira_coluna(df_est_raw, ['FILIAL', 'B2_FILIAL', 'B7_FILIAL', 'COD FILIAL', 'CÓDIGO FILIAL'])
+            c_prod = obter_primeira_coluna(df_est_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'B2_COD', 'B7_COD', 'ITEM', 'COD. PRODUTO'])
+            c_saldo = obter_primeira_coluna(df_est_raw, ['SALDO INICIAL', 'SALDO', 'QTD INICIAL', 'QUANTIDADE', 'B2_QATU', 'B7_QUANT', 'QTD', 'SALDO ATUAL', 'ESTOQUE'])
+            
+            df_est = pd.DataFrame()
+            df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
+            df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
+            
+            if c_saldo:
+                s = df_est_raw[c_saldo].astype(str).str.strip()
+                s = s.apply(lambda x: x.replace('.', '').replace(',', '.') if ',' in x else x)
+                df_est['Saldo Inicial'] = pd.to_numeric(s, errors='coerce').fillna(0.0)
+            else:
+                df_est['Saldo Inicial'] = 0.0
+        else:
+            df_est = pd.DataFrame()
+    except Exception as e:
+        df_est = pd.DataFrame()
+        
+    return df_cad, df_pc, df_barras, df_curva, df_est
 
-df_cad, df_pc, df_barras, df_curva = carregar_bases()
+df_cad, df_pc, df_barras, df_curva, df_est = carregar_bases()
 
 if df_pc.empty or df_cad.empty:
     st.warning("⚠️ Cofre incompleto. Sincronize o SB1 e o PC (Base de Pedidos) na Central de Bases.")
@@ -138,7 +162,7 @@ def carregar_recebimentos():
             "Pedido NF": "", "Tipo NF": "N/D", "Data Emissão": "", "Data Finalização": "", "FATOR AJUSTADO": None, 
             "QTDE": 0.0, "FATOR CONVERSÃO": 1, "QTDE REAL": 0.0, "Custo Unitário Real": 0.0, "Ult. Preço (SB1)": 0.0, 
             "Variação Custo (%)": 0.0, "Código Interno": "", "Pedido (Item)": "", "Saldo Pedido (PC)": 0.0, 
-            "Custo PC": 0.0, "Produto (SB1)": "", "Avisos": "", "Linha": 0
+            "Custo PC": 0.0, "Produto (SB1)": "", "Avisos": "", "Linha": 0, "Curva ABC": "C", "Ruptura": "Não"
         }
         for col, val in colunas_novas.items():
             if col not in df.columns: df[col] = val
@@ -146,7 +170,7 @@ def carregar_recebimentos():
         colunas_texto = [
             "Filial", "Nota Fiscal", "Fornecedor", "Produto", "Produto (SB1)", "Pedido XML", "Pedido Global XML", 
             "Pedido NF", "Pedido (Item)", "Código Interno", "Pedido Considerado", "Status", 
-            "Ação / Decisão", "Observações", "EAN", "Tipo NF", "Data Emissão", "Data Finalização"
+            "Ação / Decisão", "Curva ABC", "Ruptura", "EAN", "Tipo NF", "Data Emissão", "Data Finalização"
         ]
         
         for col in colunas_texto:
@@ -231,14 +255,15 @@ def processar_novos_xmls(xml_files, df_existente):
             
             novos_dados.append({
                 "ID": id_item, "Linha": linha_xml, "Finalizado": False, "Confirmado": False, "Duplicar": False, "Ação / Decisão": "Pendente", 
-                "Observações": "", "Avisos": "", "Filial": filial, "Nota Fiscal": str(nNF), "Tipo NF": tipo_nf, 
+                "Avisos": "", "Filial": filial, "Nota Fiscal": str(nNF), "Tipo NF": tipo_nf, 
                 "Data Emissão": data_emissao, "Data Finalização": "", "Fornecedor": fornecedor, 
                 "Valor Total XML": v_total_xml, "Produto": xProd[:35], "Produto (SB1)": "", "EAN": ean_clean, 
                 "Pedido XML": item_po, "Pedido Global XML": pedido_global, "Qt. XML Raw": qCom, 
                 "Custo XML Raw": vUnCom, "Pedido NF": "", "Pedido (Item)": "", "Status": "Aguardando", 
                 "QTDE": qCom, "FATOR CONVERSÃO": 1, "FATOR AJUSTADO": None, "QTDE REAL": qCom, 
                 "Custo Unitário Real": vUnCom, "Ult. Preço (SB1)": 0.0, "Variação Custo (%)": 0.0, 
-                "Código Interno": "", "Saldo Pedido (PC)": 0.0, "Custo PC": 0.0
+                "Código Interno": "", "Saldo Pedido (PC)": 0.0, "Custo PC": 0.0,
+                "Curva ABC": "C", "Ruptura": "Não"
             })
             
     df_novos = pd.DataFrame(novos_dados)
@@ -352,15 +377,29 @@ def recalcular_pendentes(df):
                 if pd.notna(val_desc) and str(val_desc).strip().lower() not in ['nan', 'none', '', '']:
                     desc_sb1 = str(val_desc).strip()
 
-        # --- ALERTA DE CURVA ABC ---
+        # --- AVALIAÇÃO DE CURVA E RUPTURA ---
+        curva_abc = "C" # Padrão é C
         if cod_interno and not df_curva.empty and 'CODIGO' in df_curva.columns:
             m_curva = df_curva[df_curva['CODIGO'] == cod_interno]
             if not m_curva.empty:
                 curva_val = str(m_curva['CURVA'].iloc[0]).strip().upper()
-                if curva_val == 'A':
-                    avisos_list.append("🚨 ALERTA CURVA A")
-                elif curva_val == 'B':
-                    avisos_list.append("⚠️ Curva B")
+                if curva_val in ['A', 'B', 'C']:
+                    curva_abc = curva_val
+                
+        ruptura = "Não"
+        saldo_est = 0.0
+        filial_str = str(row.get('Filial', '')).strip().replace('.0', '')
+        if cod_interno and not df_est.empty:
+            m_est = df_est[(df_est['Produto'] == cod_interno) & (df_est['Filial'] == filial_str)]
+            if not m_est.empty:
+                saldo_est = float(m_est['Saldo Inicial'].sum())
+                
+        if saldo_est <= 0 and cod_interno:
+            ruptura = "Sim"
+            avisos_list.append("⚠️ RUPTURA (Estoque 0)")
+            
+        if curva_abc == 'A': avisos_list.append("🚨 Curva A")
+        elif curva_abc == 'B': avisos_list.append("Curva B")
             
         fator_ajustado = pd.to_numeric(row.get('FATOR AJUSTADO', 0), errors='coerce')
         fator_ativo = fator_cadastro if pd.isna(fator_ajustado) or fator_ajustado <= 0 else int(fator_ajustado)
@@ -391,6 +430,8 @@ def recalcular_pendentes(df):
         df.at[idx, 'Saldo Pedido (PC)'] = saldo_pc 
         df.at[idx, 'Custo PC'] = custo_pc
         df.at[idx, 'Pedido Considerado'] = final_po
+        df.at[idx, 'Curva ABC'] = curva_abc
+        df.at[idx, 'Ruptura'] = ruptura
         df.at[idx, 'Avisos'] = " | ".join(avisos_list) if avisos_list else ""
         df.at[idx, 'Status'] = "OK" if not status_list else " | ".join(status_list)
         
@@ -478,7 +519,8 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                         nova_linha['Confirmado'] = row.get('Confirmado', False)
                         nova_linha['Data Finalização'] = row.get('Data Finalização', "")
                         nova_linha['Ação / Decisão'] = row.get('Ação / Decisão', 'Pendente')
-                        nova_linha['Observações'] = row.get('Observações', '')
+                        nova_linha['Curva ABC'] = row.get('Curva ABC', 'C')
+                        nova_linha['Ruptura'] = row.get('Ruptura', 'Não')
                         nova_linha['FATOR AJUSTADO'] = row.get('FATOR AJUSTADO', None)
                         nova_linha['Duplicar'] = False
                         nova_linha['Linha'] = row.get('Linha', 0)
@@ -492,7 +534,8 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                 df_base.at[real_idx, 'Confirmado'] = row.get('Confirmado', False)
                 df_base.at[real_idx, 'Data Finalização'] = str(row.get('Data Finalização', "")).strip()
                 df_base.at[real_idx, 'Ação / Decisão'] = row.get('Ação / Decisão', 'Pendente')
-                df_base.at[real_idx, 'Observações'] = row.get('Observações', '')
+                df_base.at[real_idx, 'Curva ABC'] = row.get('Curva ABC', 'C')
+                df_base.at[real_idx, 'Ruptura'] = row.get('Ruptura', 'Não')
                 df_base.at[real_idx, 'FATOR AJUSTADO'] = row.get('FATOR AJUSTADO', None)
                 df_base.at[real_idx, 'Pedido (Item)'] = limpar_zeros_pedido(ped_item_str)
                 df_base.at[real_idx, 'QTDE'] = row.get('QTDE', 0.0)
@@ -595,7 +638,7 @@ if not df_recebimentos.empty:
                                 novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual)
                             
                             cols_view = [
-                                "Duplicar", "Ação / Decisão", "Linha", "EAN", "Código Interno", "Avisos", "Observações", "Pedido Considerado",
+                                "Duplicar", "Ação / Decisão", "Linha", "EAN", "Código Interno", "Avisos", "Curva ABC", "Ruptura", "Pedido Considerado",
                                 "Pedido (Item)", "Produto", "Produto (SB1)", "QTDE", "FATOR CONVERSÃO", 
                                 "FATOR AJUSTADO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", 
                                 "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"
@@ -609,6 +652,8 @@ if not df_recebimentos.empty:
                                     "Ação / Decisão": st.column_config.SelectboxColumn("Decisão", options=["Pendente", "Liberar Entrada", "Aguardar Correção", "Ajustar Pedido"]),
                                     "Linha": st.column_config.NumberColumn("Linha XML", format="%d"),
                                     "EAN": st.column_config.TextColumn("EAN XML"),
+                                    "Curva ABC": st.column_config.TextColumn("Curva ABC"),
+                                    "Ruptura": st.column_config.TextColumn("Ruptura"),
                                     "Pedido Considerado": st.column_config.TextColumn("Pedido Considerado"),
                                     "Pedido (Item)": st.column_config.TextColumn("Pedido Específico (Item)", help="Vírgulas aqui quebram APENAS esta linha."),
                                     "Código Interno": st.column_config.TextColumn("Código Interno ✏️", help="Editável. Digite o código caso não tenha sido localizado automaticamente."),
@@ -624,7 +669,7 @@ if not df_recebimentos.empty:
                                     "QTDE REAL": st.column_config.NumberColumn("QTDE REAL (XML)"),
                                     "Saldo Pedido (PC)": st.column_config.NumberColumn("Saldo Disp. (PC)")
                                 },
-                                disabled=["Linha", "EAN", "Pedido Considerado", "Produto", "Produto (SB1)", "Avisos", "FATOR CONVERSÃO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"],
+                                disabled=["Linha", "EAN", "Pedido Considerado", "Produto", "Produto (SB1)", "Avisos", "Curva ABC", "Ruptura", "FATOR CONVERSÃO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"],
                                 use_container_width=True, hide_index=True
                             )
                             dfs_todas_edicoes.append((filial, nf, novo_ped_nf, df_ed))
@@ -663,10 +708,24 @@ if not df_recebimentos.empty:
                             pc_informado = novo_ped_nf.strip() if novo_ped_nf.strip() else ", ".join([str(p) for p in df_erros['Pedido Considerado'].unique() if str(p) not in ["Sem Pedido", "nan", "", "None"]])
                             pc_str = pc_informado if pc_informado else "Não informado"
                             
+                            # --- Integração Curva e Detalhamento de Ruptura ---
+                            df_ruptura = df_nf[df_nf['Ruptura'] == "Sim"].drop_duplicates(subset=['Código Interno'])
+
                             texto_padrao = f"{fornecedor} | {filial}\n\n"
                             texto_padrao += f"NF {nf} - {tipo_nf_atual}\n"
                             texto_padrao += f"PC {pc_str}\n\n"
-                            texto_padrao += ", ".join(lista_erros) + "\n\n"
+                            
+                            if not df_ruptura.empty:
+                                texto_padrao += "🚨 ATENÇÃO - PRODUTOS COM RUPTURA DE ESTOQUE ZERO:\n"
+                                for _, r_row in df_ruptura.iterrows():
+                                    c_int = r_row.get('Código Interno', 'Sem Cód')
+                                    desc = r_row.get('Produto (SB1)', r_row.get('Produto', ''))
+                                    curva = r_row.get('Curva ABC', 'C')
+                                    texto_padrao += f"- {c_int} | {desc} (Curva {curva})\n"
+                                texto_padrao += "\n"
+                            
+                            texto_padrao += "Divergências identificadas na nota:\n"
+                            texto_padrao += "- " + "\n- ".join(lista_erros) + "\n\n"
                             texto_padrao += "Felipe Berti Correa, por gentileza, verificar."
                             
                             col_txt, col_exc = st.columns([1, 1])
@@ -679,6 +738,8 @@ if not df_recebimentos.empty:
                                     'CÓDIGO HATO': df_erros['Código Interno'],
                                     'EAN': df_erros['EAN'],
                                     'PRODUTO XML': df_erros['Produto'],
+                                    'CURVA ABC': df_erros['Curva ABC'],
+                                    'RUPTURA': df_erros['Ruptura'],
                                     'nº NF': df_erros['Nota Fiscal'],
                                     'nome fornecedor': df_erros['Fornecedor'],
                                     'filial': df_erros['Filial'],
