@@ -104,10 +104,27 @@ def carregar_bases():
                 df_barras['EAN'] = df_barras['EAN'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     except Exception as e:
         df_barras = pd.DataFrame()
-        
-    return df_cad, df_pc, df_barras
 
-df_cad, df_pc, df_barras = carregar_bases()
+    # --- Nova Base Curva ABC ---
+    try:
+        df_curva_raw = conn.query("SELECT * FROM base_curva_abc", ttl=0).astype(str)
+        if not df_curva_raw.empty:
+            df_curva_raw.columns = [str(c).upper().strip() for c in df_curva_raw.columns]
+            df_curva = pd.DataFrame()
+            c_cod_curva = obter_primeira_coluna(df_curva_raw, ['CODIGO', 'CÓDIGO', 'PRODUTO', 'CÓDIGO INTERNO'])
+            c_curva = obter_primeira_coluna(df_curva_raw, ['CURVA', 'CURVA ABC'])
+            
+            if c_cod_curva and c_curva:
+                df_curva['CODIGO'] = df_curva_raw[c_cod_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip()
+                df_curva['CURVA'] = df_curva_raw[c_curva].astype(str).str.strip().str.upper()
+        else:
+            df_curva = pd.DataFrame()
+    except Exception as e:
+        df_curva = pd.DataFrame()
+        
+    return df_cad, df_pc, df_barras, df_curva
+
+df_cad, df_pc, df_barras, df_curva = carregar_bases()
 
 if df_pc.empty or df_cad.empty:
     st.warning("⚠️ Cofre incompleto. Sincronize o SB1 e o PC (Base de Pedidos) na Central de Bases.")
@@ -334,6 +351,16 @@ def recalcular_pendentes(df):
                 val_desc = match_cad['DESCRIÇÃO SB1'].iloc[0]
                 if pd.notna(val_desc) and str(val_desc).strip().lower() not in ['nan', 'none', '', '']:
                     desc_sb1 = str(val_desc).strip()
+
+        # --- ALERTA DE CURVA ABC ---
+        if cod_interno and not df_curva.empty and 'CODIGO' in df_curva.columns:
+            m_curva = df_curva[df_curva['CODIGO'] == cod_interno]
+            if not m_curva.empty:
+                curva_val = str(m_curva['CURVA'].iloc[0]).strip().upper()
+                if curva_val == 'A':
+                    avisos_list.append("🚨 ALERTA CURVA A")
+                elif curva_val == 'B':
+                    avisos_list.append("⚠️ Curva B")
             
         fator_ajustado = pd.to_numeric(row.get('FATOR AJUSTADO', 0), errors='coerce')
         fator_ativo = fator_cadastro if pd.isna(fator_ajustado) or fator_ajustado <= 0 else int(fator_ajustado)
