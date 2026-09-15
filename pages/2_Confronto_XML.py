@@ -112,10 +112,15 @@ def carregar_bases():
             df_curva = pd.DataFrame()
             c_cod_curva = obter_primeira_coluna(df_curva_raw, ['CODIGO', 'CÓDIGO', 'PRODUTO', 'CÓDIGO INTERNO'])
             c_curva = obter_primeira_coluna(df_curva_raw, ['CURVA', 'CURVA ABC'])
+            c_filial_curva = obter_primeira_coluna(df_curva_raw, ['FILIAL', 'LOJA'])
             
             if c_cod_curva and c_curva:
                 df_curva['CODIGO'] = df_curva_raw[c_cod_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip()
                 df_curva['CURVA'] = df_curva_raw[c_curva].astype(str).str.strip().str.upper()
+                if c_filial_curva:
+                    df_curva['FILIAL'] = df_curva_raw[c_filial_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip()
+                else:
+                    df_curva['FILIAL'] = ""
         else:
             df_curva = pd.DataFrame()
     except Exception as e:
@@ -296,6 +301,7 @@ def recalcular_pendentes(df):
             
         tipo_nf = str(row.get('Tipo NF', '')).strip()
         devolucao = row.get('Devolução', False)
+        filial_str = str(row.get('Filial', '')).strip().replace('.0', '')
             
         ean_raw = re.sub(r'\.0$', '', str(row.get('EAN', ''))).strip()
         ean_clean = ean_raw.lstrip('0') if ean_raw.lower() not in ['nan', 'none', ''] else ""
@@ -384,7 +390,11 @@ def recalcular_pendentes(df):
 
         curva_abc = "C" 
         if cod_interno and not df_curva.empty and 'CODIGO' in df_curva.columns:
-            m_curva = df_curva[df_curva['CODIGO'] == cod_interno]
+            if 'FILIAL' in df_curva.columns and not df_curva['FILIAL'].eq("").all():
+                m_curva = df_curva[(df_curva['CODIGO'] == cod_interno) & (df_curva['FILIAL'] == filial_str)]
+            else:
+                m_curva = df_curva[df_curva['CODIGO'] == cod_interno]
+                
             if not m_curva.empty:
                 curva_val = str(m_curva['CURVA'].iloc[0]).strip().upper()
                 if curva_val in ['A', 'B', 'C']:
@@ -392,7 +402,6 @@ def recalcular_pendentes(df):
                 
         ruptura = "Não"
         saldo_est = 0.0
-        filial_str = str(row.get('Filial', '')).strip().replace('.0', '')
         if cod_interno and not df_est.empty:
             m_est = df_est[(df_est['Produto'] == cod_interno) & (df_est['Filial'] == filial_str)]
             if not m_est.empty:
@@ -533,7 +542,7 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                         nova_linha['Finalizado'] = row.get('Finalizado', False)
                         nova_linha['Confirmado'] = row.get('Confirmado', False)
                         nova_linha['Data Finalização'] = row.get('Data Finalização', "")
-                        nova_linha['Devolução'] = row.get('Devolução', False)
+                        nova_linha['Ação / Decisão'] = row.get('Ação / Decisão', 'Pendente')
                         nova_linha['Curva ABC'] = row.get('Curva ABC', 'C')
                         nova_linha['Ruptura'] = row.get('Ruptura', 'Não')
                         nova_linha['FATOR AJUSTADO'] = row.get('FATOR AJUSTADO', None)
@@ -549,6 +558,7 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                 df_base.at[real_idx, 'Finalizado'] = is_finalizado
                 df_base.at[real_idx, 'Confirmado'] = row.get('Confirmado', False)
                 df_base.at[real_idx, 'Data Finalização'] = str(row.get('Data Finalização', "")).strip()
+                df_base.at[real_idx, 'Ação / Decisão'] = row.get('Ação / Decisão', 'Pendente')
                 df_base.at[real_idx, 'Devolução'] = row.get('Devolução', False)
                 df_base.at[real_idx, 'Curva ABC'] = row.get('Curva ABC', 'C')
                 df_base.at[real_idx, 'Ruptura'] = row.get('Ruptura', 'Não')
@@ -637,16 +647,15 @@ if not df_recebimentos.empty:
                     pedido_nf_atual = df_nf['Pedido NF'].iloc[0]
                     tipo_nf_atual = df_nf['Tipo NF'].iloc[0]
                     
-                    # --- Lógica de Cores do Cabeçalho ---
                     tem_devolucao = (df_nf['Devolução'] == True).any()
                     itens_com_divergencia = df_nf['Status'].apply(lambda s: str(s).strip() != "OK" and "Liberado com devolução" not in str(s)).any()
                     
                     if itens_com_divergencia:
-                        status_tag = "🔴 [VERIFICAR]" # Se houver erros graves, prioriza o alerta vermelho
+                        status_tag = "🔴 [VERIFICAR]" 
                     elif tem_devolucao:
-                        status_tag = "🟠 [LIBERADO COM DEVOLUÇÃO]" # Se estiver tudo resolvido mas tiver devolução, fica laranja
+                        status_tag = "🟠 [LIBERADO COM DEVOLUÇÃO]" 
                     else:
-                        status_tag = "🟢 [LIBERADO]" # Se estiver tudo liso
+                        status_tag = "🟢 [LIBERADO]" 
                     
                     with st.expander(f"{status_tag} 🧾 NF: {nf} ({tipo_nf_atual}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=False):
                         
@@ -664,7 +673,7 @@ if not df_recebimentos.empty:
                                 novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual)
                             
                             cols_view = [
-                                "Excluir", "Duplicar", "Devolução", "Linha", "EAN", "UM", "Código Interno", "Avisos", "Curva ABC", "Ruptura", "Pedido Considerado",
+                                "Excluir", "Duplicar", "Devolução", "Ação / Decisão", "Linha", "EAN", "UM", "Código Interno", "Avisos", "Curva ABC", "Ruptura", "Pedido Considerado",
                                 "Pedido (Item)", "Produto", "Produto (SB1)", "QTDE", "FATOR CONVERSÃO", 
                                 "FATOR AJUSTADO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", 
                                 "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"
@@ -677,6 +686,7 @@ if not df_recebimentos.empty:
                                     "Excluir": st.column_config.CheckboxColumn("Excluir 🗑️"),
                                     "Duplicar": st.column_config.CheckboxColumn("Duplicar ➕"),
                                     "Devolução": st.column_config.CheckboxColumn("Devolução ↩️"),
+                                    "Ação / Decisão": st.column_config.SelectboxColumn("Decisão", options=["Pendente", "Liberar Entrada", "Aguardar Correção", "Ajustar Pedido"]),
                                     "Linha": st.column_config.NumberColumn("Linha XML", format="%d"),
                                     "EAN": st.column_config.TextColumn("EAN XML"),
                                     "UM": st.column_config.TextColumn("UM"),
