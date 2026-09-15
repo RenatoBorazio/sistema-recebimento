@@ -359,7 +359,6 @@ def recalcular_pendentes(df):
                 chave_consumo = f"{final_po}_{cod_interno}"
                 saldo_pc = saldo_pc_banco - consumo_pc.get(chave_consumo, 0.0)
         else: 
-            # --- REGRA DE ISENÇÃO DE PEDIDO ---
             if tipo_nf not in ["Bonificação", "Brinde", "Amostra Grátis"]:
                 status_list.append("Sem Pedido")
 
@@ -426,7 +425,6 @@ def recalcular_pendentes(df):
         if abs(var_custo) > 30.0: avisos_list.append("Preço Destoante (>30%)")
         if fator_ativo > 1: avisos_list.append(f"Conv.(x{fator_ativo})")
             
-        # --- Lógica do Status e Devolução ---
         status_final = "OK" if not status_list else " | ".join(status_list)
         if decisao != "":
             status_final = "Liberado com devolução" if status_final == "OK" else status_final + " | Liberado com devolução"
@@ -536,7 +534,7 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                         nova_linha['Finalizado'] = row.get('Finalizado', False)
                         nova_linha['Confirmado'] = row.get('Confirmado', False)
                         nova_linha['Data Finalização'] = row.get('Data Finalização', "")
-                        nova_linha['Decisão'] = row.get('Decisão', '')
+                        nova_linha['Ação / Decisão'] = row.get('Ação / Decisão', 'Pendente')
                         nova_linha['Curva ABC'] = row.get('Curva ABC', 'C')
                         nova_linha['Ruptura'] = row.get('Ruptura', 'Não')
                         nova_linha['FATOR AJUSTADO'] = row.get('FATOR AJUSTADO', None)
@@ -640,8 +638,16 @@ if not df_recebimentos.empty:
                     pedido_nf_atual = df_nf['Pedido NF'].iloc[0]
                     tipo_nf_atual = df_nf['Tipo NF'].iloc[0]
                     
+                    # --- Lógica de Cores do Cabeçalho ---
+                    tem_devolucao = (df_nf['Decisão'].astype(str).str.strip() != "").any()
                     itens_com_divergencia = df_nf['Status'].apply(lambda s: str(s).strip() != "OK" and "Liberado com devolução" not in str(s)).any()
-                    status_tag = "🔴 [VERIFICAR]" if itens_com_divergencia else "🟢 [LIBERADO]"
+                    
+                    if itens_com_divergencia:
+                        status_tag = "🔴 [VERIFICAR]" # Se houver erros graves, prioriza o alerta vermelho
+                    elif tem_devolucao:
+                        status_tag = "🟠 [LIBERADO COM DEVOLUÇÃO]" # Se estiver tudo resolvido mas tiver devolução, fica laranja
+                    else:
+                        status_tag = "🟢 [LIBERADO]" # Se estiver tudo liso
                     
                     with st.expander(f"{status_tag} 🧾 NF: {nf} ({tipo_nf_atual}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=False):
                         
