@@ -8,7 +8,7 @@ st.title("⚙️ Central de Bases (Nuvem)")
 
 st.markdown("""
 Faça o upload dos arquivos extraídos do Protheus. 
-Cada base sincronizada aqui ficará disponível em tempo real para os módulos de Inventário e Confronto XML.
+Cada base sincronizada aqui ficará disponível em tempo real para os demais módulos do sistema.
 """)
 
 # --- Configuração do Banco de Dados ---
@@ -64,46 +64,68 @@ def salvar_no_banco(df, nome_tabela):
         df.to_sql(nome_tabela, conn, if_exists='replace', index=False)
         conn.commit()
 
-# --- Interface com Abas para Cada Base ---
-# Aqui garantimos que todas as bases antigas se mantenham e adicionamos a nova (Curva ABC)
-aba1, aba2, aba3, aba4, aba5 = st.tabs([
-    "Curva ABC", 
-    "Cadastro de Produtos", 
-    "Pedidos", 
-    "Estoque Inicial", 
-    "Notas Pendentes"
+# --- Função de Renderização Padrão para Uploads ---
+def renderizar_bloco_upload(tipo_base, nome_tabela):
+    """Gera o componente de upload, preview e botão de sincronização."""
+    arquivo = st.file_uploader(
+        f"Anexe o relatório: {tipo_base} (CSV, TXT, Excel)", 
+        type=["csv", "txt", "xlsx", "xls"],
+        key=nome_tabela
+    )
+    
+    if arquivo:
+        with st.spinner(f"Processando {tipo_base}..."):
+            df = processar_arquivo(arquivo)
+            if df is not None:
+                st.success("Leitura concluída! Visualização dos primeiros registros:")
+                # Mostramos apenas as 3 primeiras linhas para não ocupar muito espaço vertical
+                st.dataframe(df.head(3)) 
+                
+                if st.button(f"Sincronizar {tipo_base} na Nuvem", key=f"btn_{nome_tabela}"):
+                    with st.spinner("Gravando no banco de dados..."):
+                        try:
+                            salvar_no_banco(df, nome_tabela)
+                            st.success(f"✅ Base '{tipo_base}' atualizada com sucesso!")
+                        except Exception as e:
+                            st.error(f"Erro ao salvar: {e}")
+            else:
+                st.error("Formato não suportado ou erro na leitura.")
+
+
+# --- Estrutura Principal de Abas ---
+aba_produtos, aba_pedidos, aba_estoque, aba_notas = st.tabs([
+    "📦 Cadastro de Produtos", 
+    "🛒 Pedidos", 
+    "📦 Estoque Inicial", 
+    "🧾 Notas Pendentes"
 ])
 
-def renderizar_aba(tipo_base, nome_tabela, aba_context):
-    """Função para renderizar o uploader e botão de cada aba individualmente."""
-    with aba_context:
-        st.subheader(f"Sincronização: {tipo_base}")
-        arquivo = st.file_uploader(
-            f"Anexe o relatório de {tipo_base} (CSV, TXT, Excel)", 
-            type=["csv", "txt", "xlsx", "xls"],
-            key=nome_tabela # Garante que cada uploader seja único
-        )
+# === ABA 1: CADASTRO DE PRODUTOS ===
+with aba_produtos:
+    st.markdown("### Bases Relacionadas a Produtos")
+    st.info("Importe as planilhas do Protheus referentes ao cadastro central, classificação ABC e códigos de barras extras.")
+    
+    # Usando st.expander para organizar os 3 campos sem poluir a tela
+    with st.expander("1. Planilha de Cadastro Principal (SB1)", expanded=True):
+        renderizar_bloco_upload("Cadastro (SB1)", "base_sb1")
         
-        if arquivo:
-            with st.spinner(f"Processando {tipo_base}..."):
-                df = processar_arquivo(arquivo)
-                if df is not None:
-                    st.success("Leitura concluída! Visualização dos primeiros registros:")
-                    st.dataframe(df.head())
-                    
-                    if st.button(f"Sincronizar {tipo_base} na Nuvem", key=f"btn_{nome_tabela}"):
-                        with st.spinner("Gravando no banco de dados..."):
-                            try:
-                                salvar_no_banco(df, nome_tabela)
-                                st.success(f"✅ Base de {tipo_base} atualizada com sucesso no Supabase!")
-                            except Exception as e:
-                                st.error(f"Erro ao salvar: {e}")
-                else:
-                    st.error("Formato não suportado ou erro na leitura.")
+    with st.expander("2. Planilha da Curva ABC", expanded=False):
+        renderizar_bloco_upload("Curva ABC", "base_curva_abc")
+        
+    with st.expander("3. Planilha de Barras Adicional (SLK)", expanded=False):
+        renderizar_bloco_upload("Barras Adicional (SLK)", "base_slk")
 
-# Renderizando cada aba com sua respectiva tabela no banco
-renderizar_aba("Curva ABC", "base_curva_abc", aba1)
-renderizar_aba("Cadastro de Produtos", "base_produtos", aba2)
-renderizar_aba("Pedidos", "base_pedidos", aba3)
-renderizar_aba("Estoque Inicial", "base_estoque", aba4)
-renderizar_aba("Notas Pendentes", "base_notas", aba5)
+# === ABA 2: PEDIDOS ===
+with aba_pedidos:
+    st.subheader("Sincronização: Pedidos")
+    renderizar_bloco_upload("Pedidos", "base_pedidos")
+
+# === ABA 3: ESTOQUE INICIAL ===
+with aba_estoque:
+    st.subheader("Sincronização: Estoque Inicial")
+    renderizar_bloco_upload("Estoque Inicial", "base_estoque")
+
+# === ABA 4: NOTAS PENDENTES ===
+with aba_notas:
+    st.subheader("Sincronização: Notas Pendentes")
+    renderizar_bloco_upload("Notas Pendentes", "base_notas")
