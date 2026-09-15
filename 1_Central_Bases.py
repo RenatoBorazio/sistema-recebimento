@@ -1,28 +1,27 @@
 import streamlit as st
 import pandas as pd
 import io
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 
 st.set_page_config(page_title="Central de Bases - Protheus", layout="wide")
 st.title("⚙️ Central de Bases (Nuvem)")
 
 st.markdown("""
-Esta central atua como hub, garantindo que os dados sincronizados estejam disponíveis 
-instantaneamente para os módulos de Inventário e de Confronto de XML.
+Faça o upload dos arquivos extraídos do Protheus. 
+Cada base sincronizada aqui ficará disponível em tempo real para os módulos de Inventário e Confronto XML.
 """)
 
-# Configuração do banco de dados (Supabase)
-# Lembre-se de configurar a variável no seu st.secrets
+# --- Configuração do Banco de Dados ---
 @st.cache_resource
 def init_connection():
-    # URL de exemplo; substitua pela string de conexão real do Supabase
     db_url = st.secrets.get("SUPABASE_DB_URL", "sqlite:///banco_nuvem.db")
     return create_engine(db_url)
 
 engine = init_connection()
 
+# --- Funções Auxiliares ---
 def detectar_separador(file_bytes):
-    """Motor simples para detectar o separador de arquivos TXT/CSV."""
+    """Detecta se o arquivo usa ponto e vírgula, tabulação ou vírgula."""
     amostra = file_bytes.decode('utf-8', errors='ignore')[:1024]
     if ';' in amostra: 
         return ';'
@@ -41,14 +40,13 @@ def limpar_colunas_duplicadas(df):
     return df
 
 def processar_arquivo(uploaded_file):
+    """Lê o arquivo, ajusta o cabeçalho do Protheus e limpa as colunas."""
     nome_arquivo = uploaded_file.name.lower()
     
     if nome_arquivo.endswith('.csv') or nome_arquivo.endswith('.txt'):
         bytes_data = uploaded_file.getvalue()
         sep = detectar_separador(bytes_data)
-        
-        # Tratamento para alinhar cabeçalhos do Protheus que contêm metadados no topo
-        # on_bad_lines='skip' ajuda a ignorar quebras no cabeçalho inicial
+        # on_bad_lines='skip' ignora as quebras de metadados no cabeçalho do Protheus
         df = pd.read_csv(io.BytesIO(bytes_data), sep=sep, on_bad_lines='skip', engine='python')
         
     elif nome_arquivo.endswith('.xlsx') or nome_arquivo.endswith('.xls'):
@@ -56,53 +54,56 @@ def processar_arquivo(uploaded_file):
     else:
         return None
 
-    # Padronização e remoção de duplicatas no cabeçalho
     df.columns = df.columns.str.strip().str.upper()
     df = limpar_colunas_duplicadas(df)
-    
     return df
 
 def salvar_no_banco(df, nome_tabela):
+    """Grava os dados no banco configurado via SQLAlchemy."""
     with engine.connect() as conn:
         df.to_sql(nome_tabela, conn, if_exists='replace', index=False)
         conn.commit()
 
-# --- Interface da Aplicação ---
+# --- Interface com Abas para Cada Base ---
+# Aqui garantimos que todas as bases antigas se mantenham e adicionamos a nova (Curva ABC)
+aba1, aba2, aba3, aba4, aba5 = st.tabs([
+    "Curva ABC", 
+    "Cadastro de Produtos", 
+    "Pedidos", 
+    "Estoque Inicial", 
+    "Notas Pendentes"
+])
 
-tipo_base = st.selectbox(
-    "Selecione a base que deseja sincronizar:",
-    ["Curva ABC", "Cadastro de Produtos", "Pedidos", "Estoque Inicial", "Notas Pendentes"]
-)
-
-uploaded_file = st.file_uploader(
-    f"Faça o upload do arquivo para {tipo_base} (Excel, CSV ou TXT)", 
-    type=["csv", "txt", "xlsx", "xls"]
-)
-
-if uploaded_file is not None:
-    with st.spinner("Processando o arquivo e ajustando cabeçalhos do Protheus..."):
-        df = processar_arquivo(uploaded_file)
+def renderizar_aba(tipo_base, nome_tabela, aba_context):
+    """Função para renderizar o uploader e botão de cada aba individualmente."""
+    with aba_context:
+        st.subheader(f"Sincronização: {tipo_base}")
+        arquivo = st.file_uploader(
+            f"Anexe o relatório de {tipo_base} (CSV, TXT, Excel)", 
+            type=["csv", "txt", "xlsx", "xls"],
+            key=nome_tabela # Garante que cada uploader seja único
+        )
         
-        if df is not None:
-            st.success("Arquivo lido e padronizado com sucesso!")
-            st.dataframe(df.head())
-            
-            if st.button("Sincronizar com a Nuvem"):
-                with st.spinner(f"Gravando base '{tipo_base}' no Supabase..."):
-                    # Mapeamento do nome das tabelas no banco de dados
-                    tabelas = {
-                        "Curva ABC": "base_curva_abc",
-                        "Cadastro de Produtos": "base_produtos",
-                        "Pedidos": "base_pedidos",
-                        "Estoque Inicial": "base_estoque",
-                        "Notas Pendentes": "base_notas"
-                    }
-                    nome_tabela = tabelas[tipo_base]
+        if arquivo:
+            with st.spinner(f"Processando {tipo_base}..."):
+                df = processar_arquivo(arquivo)
+                if df is not None:
+                    st.success("Leitura concluída! Visualização dos primeiros registros:")
+                    st.dataframe(df.head())
                     
-                    try:
-                        salvar_no_banco(df, nome_tabela)
-                        st.success(f"✅ Base '{tipo_base}' sincronizada com sucesso e pronta para uso na equipe!")
-                    except Exception as e:
-                        st.error(f"Erro ao salvar no banco de dados: {e}")
-        else:
-            st.error("Formato de arquivo não suportado ou erro durante a leitura.")
+                    if st.button(f"Sincronizar {tipo_base} na Nuvem", key=f"btn_{nome_tabela}"):
+                        with st.spinner("Gravando no banco de dados..."):
+                            try:
+                                salvar_no_banco(df, nome_tabela)
+                                st.success(f"✅ Base de {tipo_base} atualizada com sucesso no Supabase!")
+                            except Exception as e:
+                                st.error(f"Erro ao salvar: {e}")
+                else:
+                    st.error("Formato não suportado ou erro na leitura.")
+
+# Renderizando cada aba com sua respectiva tabela no banco
+renderizar_aba("Curva ABC", "base_curva_abc", aba1)
+renderizar_aba("Cadastro de Produtos", "base_produtos", aba2)
+renderizar_aba("Pedidos", "base_pedidos", aba3)
+renderizar_aba("Estoque Inicial", "base_estoque", aba4)
+renderizar_aba("Notas Pendentes", "base_notas", aba5)
