@@ -160,7 +160,8 @@ def carregar_recebimentos():
             "Pedido NF": "", "Tipo NF": "N/D", "Data Emissão": "", "Data Finalização": "", "FATOR AJUSTADO": None, 
             "QTDE": 0.0, "FATOR CONVERSÃO": 1, "QTDE REAL": 0.0, "Custo Unitário Real": 0.0, "Ult. Preço (SB1)": 0.0, 
             "Variação Custo (%)": 0.0, "Código Interno": "", "Pedido (Item)": "", "Saldo Pedido (PC)": 0.0, 
-            "Custo PC": 0.0, "Produto (SB1)": "", "Avisos": "", "Linha": 0, "UM": "", "Curva ABC": "C", "Ruptura": "Não"
+            "Custo PC": 0.0, "Produto (SB1)": "", "Avisos": "", "Linha": 0, "UM": "", "Curva ABC": "C", "Ruptura": "Não",
+            "Decisão": ""
         }
         for col, val in colunas_novas.items():
             if col not in df.columns: df[col] = val
@@ -168,7 +169,7 @@ def carregar_recebimentos():
         colunas_texto = [
             "Filial", "Nota Fiscal", "Fornecedor", "Produto", "Produto (SB1)", "Pedido XML", "Pedido Global XML", 
             "Pedido NF", "Pedido (Item)", "Código Interno", "Pedido Considerado", "Status", 
-            "Ação / Decisão", "UM", "Curva ABC", "Ruptura", "EAN", "Tipo NF", "Data Emissão", "Data Finalização"
+            "Decisão", "UM", "Curva ABC", "Ruptura", "EAN", "Tipo NF", "Data Emissão", "Data Finalização"
         ]
         
         for col in colunas_texto:
@@ -232,7 +233,6 @@ def processar_novos_xmls(xml_files, df_existente):
             ean = ean_node.text or ""
             ean_clean = str(ean).strip()
             
-            # --- Extraindo a Unidade de Medida (UM) ---
             uCom_node = prod.find('nfe:uCom', namespaces)
             uCom = uCom_node.text.strip().upper() if uCom_node is not None else ""
             
@@ -256,7 +256,7 @@ def processar_novos_xmls(xml_files, df_existente):
             id_item = f"{nNF}_{ean_clean}_{linha_xml}_{qCom}_{vUnCom}" 
             
             novos_dados.append({
-                "ID": id_item, "Linha": linha_xml, "Finalizado": False, "Confirmado": False, "Duplicar": False, "Excluir": False, "Ação / Decisão": "Pendente", 
+                "ID": id_item, "Linha": linha_xml, "Finalizado": False, "Confirmado": False, "Duplicar": False, "Excluir": False, "Decisão": "", 
                 "Avisos": "", "Filial": filial, "Nota Fiscal": str(nNF), "Tipo NF": tipo_nf, 
                 "Data Emissão": data_emissao, "Data Finalização": "", "Fornecedor": fornecedor, 
                 "Valor Total XML": v_total_xml, "Produto": xProd[:35], "Produto (SB1)": "", "EAN": ean_clean, "UM": uCom,
@@ -294,6 +294,9 @@ def recalcular_pendentes(df):
     
     for idx, row in df.iterrows():
         if row.get('Finalizado', False) == True: continue 
+            
+        tipo_nf = str(row.get('Tipo NF', '')).strip()
+        decisao = str(row.get('Decisão', '')).strip()
             
         ean_raw = re.sub(r'\.0$', '', str(row.get('EAN', ''))).strip()
         ean_clean = ean_raw.lstrip('0') if ean_raw.lower() not in ['nan', 'none', ''] else ""
@@ -356,7 +359,9 @@ def recalcular_pendentes(df):
                 chave_consumo = f"{final_po}_{cod_interno}"
                 saldo_pc = saldo_pc_banco - consumo_pc.get(chave_consumo, 0.0)
         else: 
-            status_list.append("Sem Pedido")
+            # --- REGRA DE ISENÇÃO DE PEDIDO ---
+            if tipo_nf not in ["Bonificação", "Brinde", "Amostra Grátis"]:
+                status_list.append("Sem Pedido")
 
         match_cad = pd.DataFrame()
         fator_cadastro = 1
@@ -421,6 +426,11 @@ def recalcular_pendentes(df):
         if abs(var_custo) > 30.0: avisos_list.append("Preço Destoante (>30%)")
         if fator_ativo > 1: avisos_list.append(f"Conv.(x{fator_ativo})")
             
+        # --- Lógica do Status e Devolução ---
+        status_final = "OK" if not status_list else " | ".join(status_list)
+        if decisao != "":
+            status_final = "Liberado com devolução" if status_final == "OK" else status_final + " | Liberado com devolução"
+            
         df.at[idx, 'FATOR CONVERSÃO'] = fator_cadastro
         df.at[idx, 'QTDE REAL'] = qtde_real
         df.at[idx, 'Custo Unitário Real'] = custo_unit_real
@@ -434,7 +444,8 @@ def recalcular_pendentes(df):
         df.at[idx, 'Curva ABC'] = curva_abc
         df.at[idx, 'Ruptura'] = ruptura
         df.at[idx, 'Avisos'] = " | ".join(avisos_list) if avisos_list else ""
-        df.at[idx, 'Status'] = "OK" if not status_list else " | ".join(status_list)
+        df.at[idx, 'Status'] = status_final
+        df.at[idx, 'Decisão'] = decisao
         
     return df
 
@@ -445,7 +456,6 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
     for filial, nf, ped_nf_str, df_ed in lista_edicoes:
         for real_idx, row in df_ed.iterrows():
             
-            # --- Se a linha foi marcada para exclusão ---
             if row.get('Excluir', False):
                 if real_idx not in linhas_a_remover:
                     linhas_a_remover.append(real_idx)
@@ -526,7 +536,7 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                         nova_linha['Finalizado'] = row.get('Finalizado', False)
                         nova_linha['Confirmado'] = row.get('Confirmado', False)
                         nova_linha['Data Finalização'] = row.get('Data Finalização', "")
-                        nova_linha['Ação / Decisão'] = row.get('Ação / Decisão', 'Pendente')
+                        nova_linha['Decisão'] = row.get('Decisão', '')
                         nova_linha['Curva ABC'] = row.get('Curva ABC', 'C')
                         nova_linha['Ruptura'] = row.get('Ruptura', 'Não')
                         nova_linha['FATOR AJUSTADO'] = row.get('FATOR AJUSTADO', None)
@@ -542,7 +552,7 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                 df_base.at[real_idx, 'Finalizado'] = is_finalizado
                 df_base.at[real_idx, 'Confirmado'] = row.get('Confirmado', False)
                 df_base.at[real_idx, 'Data Finalização'] = str(row.get('Data Finalização', "")).strip()
-                df_base.at[real_idx, 'Ação / Decisão'] = row.get('Ação / Decisão', 'Pendente')
+                df_base.at[real_idx, 'Decisão'] = str(row.get('Decisão', '')).strip()
                 df_base.at[real_idx, 'Curva ABC'] = row.get('Curva ABC', 'C')
                 df_base.at[real_idx, 'Ruptura'] = row.get('Ruptura', 'Não')
                 df_base.at[real_idx, 'FATOR AJUSTADO'] = row.get('FATOR AJUSTADO', None)
@@ -630,7 +640,7 @@ if not df_recebimentos.empty:
                     pedido_nf_atual = df_nf['Pedido NF'].iloc[0]
                     tipo_nf_atual = df_nf['Tipo NF'].iloc[0]
                     
-                    itens_com_divergencia = df_nf['Status'].apply(lambda s: str(s).strip() != "OK").any()
+                    itens_com_divergencia = df_nf['Status'].apply(lambda s: str(s).strip() != "OK" and "Liberado com devolução" not in str(s)).any()
                     status_tag = "🔴 [VERIFICAR]" if itens_com_divergencia else "🟢 [LIBERADO]"
                     
                     with st.expander(f"{status_tag} 🧾 NF: {nf} ({tipo_nf_atual}) | 🏷️ Fornec: {fornecedor} | 💰 R$ {v_total:,.2f}", expanded=False):
@@ -649,7 +659,7 @@ if not df_recebimentos.empty:
                                 novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual)
                             
                             cols_view = [
-                                "Excluir", "Duplicar", "Ação / Decisão", "Linha", "EAN", "UM", "Código Interno", "Avisos", "Curva ABC", "Ruptura", "Pedido Considerado",
+                                "Excluir", "Duplicar", "Decisão", "Linha", "EAN", "UM", "Código Interno", "Avisos", "Curva ABC", "Ruptura", "Pedido Considerado",
                                 "Pedido (Item)", "Produto", "Produto (SB1)", "QTDE", "FATOR CONVERSÃO", 
                                 "FATOR AJUSTADO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", 
                                 "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"
@@ -661,7 +671,7 @@ if not df_recebimentos.empty:
                                 column_config={
                                     "Excluir": st.column_config.CheckboxColumn("Excluir 🗑️"),
                                     "Duplicar": st.column_config.CheckboxColumn("Duplicar ➕"),
-                                    "Ação / Decisão": st.column_config.SelectboxColumn("Decisão", options=["Pendente", "Liberar Entrada", "Aguardar Correção", "Ajustar Pedido"]),
+                                    "Decisão": st.column_config.TextColumn("Decisão (Devolução)"),
                                     "Linha": st.column_config.NumberColumn("Linha XML", format="%d"),
                                     "EAN": st.column_config.TextColumn("EAN XML"),
                                     "UM": st.column_config.TextColumn("UM"),
@@ -709,65 +719,66 @@ if not df_recebimentos.empty:
                             st.markdown("---")
                             st.markdown("#### 🚨 Reporte de Divergência (Acionar Compras)")
                             
-                            df_erros = df_nf[df_nf['Status'].apply(lambda s: str(s).strip() != "OK")].copy()
+                            df_erros = df_nf[~df_nf['Status'].str.contains('OK|Liberado', case=False, na=False)].copy()
                             
-                            lista_erros = []
-                            if df_erros['Status'].str.contains('Custo Maior').any(): lista_erros.append("Divergência de custo")
-                            if df_erros['Status'].str.contains('Saldo Insuficiente').any(): lista_erros.append("Saldo insuficiente no PC")
-                            if df_erros['Status'].str.contains('Sem Pedido').any(): lista_erros.append("Item sem pedido / PC não informado na NF")
-                            if df_erros['Status'].str.contains('Inexistente no PC').any(): lista_erros.append("Item inexistente no PC informado")
-                            if (df_erros['Código Interno'] == "").any(): lista_erros.append("EANs não cadastrados (Itens não localizados pela descrição)")
-                            
-                            pc_informado = novo_ped_nf.strip() if novo_ped_nf.strip() else ", ".join([str(p) for p in df_erros['Pedido Considerado'].unique() if str(p) not in ["Sem Pedido", "nan", "", "None"]])
-                            pc_str = pc_informado if pc_informado else "Não informado"
-                            
-                            df_ruptura = df_nf[df_nf['Ruptura'] == "Sim"].drop_duplicates(subset=['Código Interno'])
-
-                            texto_padrao = f"{fornecedor} | {filial}\n\n"
-                            texto_padrao += f"NF {nf} - {tipo_nf_atual}\n"
-                            texto_padrao += f"PC {pc_str}\n\n"
-                            
-                            if not df_ruptura.empty:
-                                texto_padrao += "🚨 ATENÇÃO - PRODUTOS COM RUPTURA DE ESTOQUE ZERO:\n"
-                                for _, r_row in df_ruptura.iterrows():
-                                    c_int = r_row.get('Código Interno', 'Sem Cód')
-                                    desc = r_row.get('Produto (SB1)', r_row.get('Produto', ''))
-                                    curva = r_row.get('Curva ABC', 'C')
-                                    texto_padrao += f"- {c_int} | {desc} (Curva {curva})\n"
-                                texto_padrao += "\n"
-                            
-                            texto_padrao += "Divergências identificadas na nota:\n"
-                            texto_padrao += "- " + "\n- ".join(lista_erros) + "\n\n"
-                            texto_padrao += "Felipe Berti Correa, por gentileza, verificar."
-                            
-                            col_txt, col_exc = st.columns([1, 1])
-                            with col_txt:
-                                st.markdown("**📝 Copie a mensagem padrão:**")
-                                st.code(texto_padrao, language="text")
-                            with col_exc:
-                                df_export_erros = pd.DataFrame({
-                                    'LINHA XML': df_erros['Linha'],
-                                    'CÓDIGO HATO': df_erros['Código Interno'],
-                                    'EAN': df_erros['EAN'],
-                                    'UM': df_erros['UM'],
-                                    'PRODUTO XML': df_erros['Produto'],
-                                    'CURVA ABC': df_erros['Curva ABC'],
-                                    'RUPTURA': df_erros['Ruptura'],
-                                    'nº NF': df_erros['Nota Fiscal'],
-                                    'nome fornecedor': df_erros['Fornecedor'],
-                                    'filial': df_erros['Filial'],
-                                    'QTDE PEDIDO (PC)': df_erros['Saldo Pedido (PC)'],
-                                    'QTDE REAL (XML)': df_erros['QTDE REAL'],
-                                    'CUSTO PEDIDO (PC)': df_erros['Custo PC'],
-                                    'CUSTO REAL (XML)': df_erros['Custo Unitário Real'],
-                                    'DIVERGÊNCIA': df_erros['Status']
-                                })
-                                output_erros = io.BytesIO()
-                                with pd.ExcelWriter(output_erros, engine='openpyxl') as writer:
-                                    df_export_erros.to_excel(writer, sheet_name="Divergencias", index=False)
+                            if not df_erros.empty:
+                                lista_erros = []
+                                if df_erros['Status'].str.contains('Custo Maior').any(): lista_erros.append("Divergência de custo")
+                                if df_erros['Status'].str.contains('Saldo Insuficiente').any(): lista_erros.append("Saldo insuficiente no PC")
+                                if df_erros['Status'].str.contains('Sem Pedido').any(): lista_erros.append("Item sem pedido / PC não informado na NF")
+                                if df_erros['Status'].str.contains('Inexistente no PC').any(): lista_erros.append("Item inexistente no PC informado")
+                                if (df_erros['Código Interno'] == "").any(): lista_erros.append("EANs não cadastrados (Itens não localizados pela descrição)")
                                 
-                                st.write("Envie a planilha com as divergências completas:")
-                                st.download_button(f"📥 Baixar Excel ({filial} - {nf})", data=output_erros.getvalue(), file_name=f"{filial}_{nf}_Divergencias.xlsx", type="secondary", use_container_width=True)
+                                pc_informado = novo_ped_nf.strip() if novo_ped_nf.strip() else ", ".join([str(p) for p in df_erros['Pedido Considerado'].unique() if str(p) not in ["Sem Pedido", "nan", "", "None"]])
+                                pc_str = pc_informado if pc_informado else "Não informado"
+                                
+                                df_ruptura = df_nf[df_nf['Ruptura'] == "Sim"].drop_duplicates(subset=['Código Interno'])
+
+                                texto_padrao = f"{fornecedor} | {filial}\n\n"
+                                texto_padrao += f"NF {nf} - {tipo_nf_atual}\n"
+                                texto_padrao += f"PC {pc_str}\n\n"
+                                
+                                if not df_ruptura.empty:
+                                    texto_padrao += "🚨 ATENÇÃO - PRODUTOS COM RUPTURA DE ESTOQUE ZERO:\n"
+                                    for _, r_row in df_ruptura.iterrows():
+                                        c_int = r_row.get('Código Interno', 'Sem Cód')
+                                        desc = r_row.get('Produto (SB1)', r_row.get('Produto', ''))
+                                        curva = r_row.get('Curva ABC', 'C')
+                                        texto_padrao += f"- {c_int} | {desc} (Curva {curva})\n"
+                                    texto_padrao += "\n"
+                                
+                                texto_padrao += "Divergências identificadas na nota:\n"
+                                texto_padrao += "- " + "\n- ".join(lista_erros) + "\n\n"
+                                texto_padrao += "Felipe Berti Correa, por gentileza, verificar."
+                                
+                                col_txt, col_exc = st.columns([1, 1])
+                                with col_txt:
+                                    st.markdown("**📝 Copie a mensagem padrão:**")
+                                    st.code(texto_padrao, language="text")
+                                with col_exc:
+                                    df_export_erros = pd.DataFrame({
+                                        'LINHA XML': df_erros['Linha'],
+                                        'CÓDIGO HATO': df_erros['Código Interno'],
+                                        'EAN': df_erros['EAN'],
+                                        'UM': df_erros['UM'],
+                                        'PRODUTO XML': df_erros['Produto'],
+                                        'CURVA ABC': df_erros['Curva ABC'],
+                                        'RUPTURA': df_erros['Ruptura'],
+                                        'nº NF': df_erros['Nota Fiscal'],
+                                        'nome fornecedor': df_erros['Fornecedor'],
+                                        'filial': df_erros['Filial'],
+                                        'QTDE PEDIDO (PC)': df_erros['Saldo Pedido (PC)'],
+                                        'QTDE REAL (XML)': df_erros['QTDE REAL'],
+                                        'CUSTO PEDIDO (PC)': df_erros['Custo PC'],
+                                        'CUSTO REAL (XML)': df_erros['Custo Unitário Real'],
+                                        'DIVERGÊNCIA': df_erros['Status']
+                                    })
+                                    output_erros = io.BytesIO()
+                                    with pd.ExcelWriter(output_erros, engine='openpyxl') as writer:
+                                        df_export_erros.to_excel(writer, sheet_name="Divergencias", index=False)
+                                    
+                                    st.write("Envie a planilha com as divergências completas:")
+                                    st.download_button(f"📥 Baixar Excel ({filial} - {nf})", data=output_erros.getvalue(), file_name=f"{filial}_{nf}_Divergencias.xlsx", type="secondary", use_container_width=True)
             
             st.divider()
             colA_global, colB_global = st.columns(2)
