@@ -156,12 +156,11 @@ def carregar_recebimentos():
     try:
         df = conn.query("SELECT * FROM recebimentos_xml", ttl=0)
         colunas_novas = {
-            "Finalizado": False, "Confirmado": False, "Duplicar": False, "Excluir": False, "Filial": "", "Valor Total XML": 0.0, 
+            "Finalizado": False, "Confirmado": False, "Duplicar": False, "Excluir": False, "Devolução": False, "Filial": "", "Valor Total XML": 0.0, 
             "Pedido NF": "", "Tipo NF": "N/D", "Data Emissão": "", "Data Finalização": "", "FATOR AJUSTADO": None, 
             "QTDE": 0.0, "FATOR CONVERSÃO": 1, "QTDE REAL": 0.0, "Custo Unitário Real": 0.0, "Ult. Preço (SB1)": 0.0, 
             "Variação Custo (%)": 0.0, "Código Interno": "", "Pedido (Item)": "", "Saldo Pedido (PC)": 0.0, 
-            "Custo PC": 0.0, "Produto (SB1)": "", "Avisos": "", "Linha": 0, "UM": "", "Curva ABC": "C", "Ruptura": "Não",
-            "Decisão": ""
+            "Custo PC": 0.0, "Produto (SB1)": "", "Avisos": "", "Linha": 0, "UM": "", "Curva ABC": "C", "Ruptura": "Não"
         }
         for col, val in colunas_novas.items():
             if col not in df.columns: df[col] = val
@@ -169,7 +168,7 @@ def carregar_recebimentos():
         colunas_texto = [
             "Filial", "Nota Fiscal", "Fornecedor", "Produto", "Produto (SB1)", "Pedido XML", "Pedido Global XML", 
             "Pedido NF", "Pedido (Item)", "Código Interno", "Pedido Considerado", "Status", 
-            "Decisão", "UM", "Curva ABC", "Ruptura", "EAN", "Tipo NF", "Data Emissão", "Data Finalização"
+            "UM", "Curva ABC", "Ruptura", "EAN", "Tipo NF", "Data Emissão", "Data Finalização"
         ]
         
         for col in colunas_texto:
@@ -256,7 +255,7 @@ def processar_novos_xmls(xml_files, df_existente):
             id_item = f"{nNF}_{ean_clean}_{linha_xml}_{qCom}_{vUnCom}" 
             
             novos_dados.append({
-                "ID": id_item, "Linha": linha_xml, "Finalizado": False, "Confirmado": False, "Duplicar": False, "Excluir": False, "Decisão": "", 
+                "ID": id_item, "Linha": linha_xml, "Finalizado": False, "Confirmado": False, "Duplicar": False, "Excluir": False, "Devolução": False, 
                 "Avisos": "", "Filial": filial, "Nota Fiscal": str(nNF), "Tipo NF": tipo_nf, 
                 "Data Emissão": data_emissao, "Data Finalização": "", "Fornecedor": fornecedor, 
                 "Valor Total XML": v_total_xml, "Produto": xProd[:35], "Produto (SB1)": "", "EAN": ean_clean, "UM": uCom,
@@ -296,7 +295,7 @@ def recalcular_pendentes(df):
         if row.get('Finalizado', False) == True: continue 
             
         tipo_nf = str(row.get('Tipo NF', '')).strip()
-        decisao = str(row.get('Decisão', '')).strip()
+        devolucao = row.get('Devolução', False)
             
         ean_raw = re.sub(r'\.0$', '', str(row.get('EAN', ''))).strip()
         ean_clean = ean_raw.lstrip('0') if ean_raw.lower() not in ['nan', 'none', ''] else ""
@@ -426,7 +425,7 @@ def recalcular_pendentes(df):
         if fator_ativo > 1: avisos_list.append(f"Conv.(x{fator_ativo})")
             
         status_final = "OK" if not status_list else " | ".join(status_list)
-        if decisao != "":
+        if devolucao:
             status_final = "Liberado com devolução" if status_final == "OK" else status_final + " | Liberado com devolução"
             
         df.at[idx, 'FATOR CONVERSÃO'] = fator_cadastro
@@ -443,7 +442,7 @@ def recalcular_pendentes(df):
         df.at[idx, 'Ruptura'] = ruptura
         df.at[idx, 'Avisos'] = " | ".join(avisos_list) if avisos_list else ""
         df.at[idx, 'Status'] = status_final
-        df.at[idx, 'Decisão'] = decisao
+        df.at[idx, 'Devolução'] = devolucao
         
     return df
 
@@ -534,7 +533,7 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                         nova_linha['Finalizado'] = row.get('Finalizado', False)
                         nova_linha['Confirmado'] = row.get('Confirmado', False)
                         nova_linha['Data Finalização'] = row.get('Data Finalização', "")
-                        nova_linha['Ação / Decisão'] = row.get('Ação / Decisão', 'Pendente')
+                        nova_linha['Devolução'] = row.get('Devolução', False)
                         nova_linha['Curva ABC'] = row.get('Curva ABC', 'C')
                         nova_linha['Ruptura'] = row.get('Ruptura', 'Não')
                         nova_linha['FATOR AJUSTADO'] = row.get('FATOR AJUSTADO', None)
@@ -550,7 +549,7 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                 df_base.at[real_idx, 'Finalizado'] = is_finalizado
                 df_base.at[real_idx, 'Confirmado'] = row.get('Confirmado', False)
                 df_base.at[real_idx, 'Data Finalização'] = str(row.get('Data Finalização', "")).strip()
-                df_base.at[real_idx, 'Decisão'] = str(row.get('Decisão', '')).strip()
+                df_base.at[real_idx, 'Devolução'] = row.get('Devolução', False)
                 df_base.at[real_idx, 'Curva ABC'] = row.get('Curva ABC', 'C')
                 df_base.at[real_idx, 'Ruptura'] = row.get('Ruptura', 'Não')
                 df_base.at[real_idx, 'FATOR AJUSTADO'] = row.get('FATOR AJUSTADO', None)
@@ -639,7 +638,7 @@ if not df_recebimentos.empty:
                     tipo_nf_atual = df_nf['Tipo NF'].iloc[0]
                     
                     # --- Lógica de Cores do Cabeçalho ---
-                    tem_devolucao = (df_nf['Decisão'].astype(str).str.strip() != "").any()
+                    tem_devolucao = (df_nf['Devolução'] == True).any()
                     itens_com_divergencia = df_nf['Status'].apply(lambda s: str(s).strip() != "OK" and "Liberado com devolução" not in str(s)).any()
                     
                     if itens_com_divergencia:
@@ -665,7 +664,7 @@ if not df_recebimentos.empty:
                                 novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual)
                             
                             cols_view = [
-                                "Excluir", "Duplicar", "Decisão", "Linha", "EAN", "UM", "Código Interno", "Avisos", "Curva ABC", "Ruptura", "Pedido Considerado",
+                                "Excluir", "Duplicar", "Devolução", "Linha", "EAN", "UM", "Código Interno", "Avisos", "Curva ABC", "Ruptura", "Pedido Considerado",
                                 "Pedido (Item)", "Produto", "Produto (SB1)", "QTDE", "FATOR CONVERSÃO", 
                                 "FATOR AJUSTADO", "QTDE REAL", "Custo Unitário Real", "Ult. Preço (SB1)", 
                                 "Variação Custo (%)", "Saldo Pedido (PC)", "Custo PC", "Status"
@@ -677,7 +676,7 @@ if not df_recebimentos.empty:
                                 column_config={
                                     "Excluir": st.column_config.CheckboxColumn("Excluir 🗑️"),
                                     "Duplicar": st.column_config.CheckboxColumn("Duplicar ➕"),
-                                    "Decisão": st.column_config.TextColumn("Decisão (Devolução)"),
+                                    "Devolução": st.column_config.CheckboxColumn("Devolução ↩️"),
                                     "Linha": st.column_config.NumberColumn("Linha XML", format="%d"),
                                     "EAN": st.column_config.TextColumn("EAN XML"),
                                     "UM": st.column_config.TextColumn("UM"),
