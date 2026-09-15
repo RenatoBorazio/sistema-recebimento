@@ -36,21 +36,19 @@ def obter_primeira_coluna(df, nomes_possiveis):
     return None
 
 def carregar_bases():
-    # 1. Base SB1 (Cadastro de Produtos)
     try:
-        df_cad_raw = conn.query("SELECT * FROM base_sb1", ttl=0).astype(str)
+        df_cad_raw = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
         if not df_cad_raw.empty:
             df_cad_raw.columns = [str(c).upper().strip() for c in df_cad_raw.columns]
             
-            c_barras = obter_primeira_coluna(df_cad_raw, ['CÓDIGO DE BARRAS', 'COD BARRAS', 'EAN', 'CODIGO DE BARRAS', 'COD. BARRAS', 'B1_CODBAR'])
-            c_int = obter_primeira_coluna(df_cad_raw, ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO INTERNO', 'B1_COD'])
-            c_desc = obter_primeira_coluna(df_cad_raw, ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME', 'B1_DESC'])
+            c_barras = obter_primeira_coluna(df_cad_raw, ['CÓDIGO DE BARRAS', 'COD BARRAS', 'EAN', 'CODIGO DE BARRAS', 'COD. BARRAS'])
+            c_int = obter_primeira_coluna(df_cad_raw, ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO INTERNO'])
+            c_desc = obter_primeira_coluna(df_cad_raw, ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME'])
             c_fator = obter_primeira_coluna(df_cad_raw, ['FATOR', 'FATOR CONV.', 'FATOR CONVERSAO'])
             c_preco = obter_primeira_coluna(df_cad_raw, ['ULT. PRECO', 'ULT. PREÇO', 'ULTIMO PRECO', 'ULTIMO PREÇO', 'CUSTO STAND.', 'CUSTO', 'PRECO VENDA'])
             
             df_cad = pd.DataFrame()
-            # MELHORIA: Zfill(13) padroniza EANs para garantir o cruzamento exato
-            df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip().apply(lambda x: x.zfill(13) if x else "") if c_barras else ""
+            df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
             df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
             df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', ''], '').str.strip() if c_desc else ""
             df_cad['FATOR'] = pd.to_numeric(df_cad_raw[c_fator], errors='coerce').fillna(1) if c_fator else 1
@@ -61,31 +59,26 @@ def carregar_bases():
         st.error(f"Erro interno ao ler o Cadastro (SB1): {e}")
         df_cad = pd.DataFrame()
         
-    # 2. Base de Pedidos (PC)
     try:
         df_pc_raw = conn.query("SELECT * FROM base_pedidos", ttl=0).astype(str)
         if not df_pc_raw.empty:
             df_pc_raw.columns = [str(c).upper().strip() for c in df_pc_raw.columns]
             
-            c_num = obter_primeira_coluna(df_pc_raw, ['NUMERO PC', 'NUMERO', 'PEDIDO', 'NÚMERO', 'C7_NUM'])
+            c_num = obter_primeira_coluna(df_pc_raw, ['NUMERO PC', 'NUMERO', 'PEDIDO', 'NÚMERO'])
             c_barras_pc = obter_primeira_coluna(df_pc_raw, ['COD BARRAS', 'EAN', 'BARRAS', 'GTIN', 'CÓDIGO DE BARRAS', 'CODIGO DE BARRAS'])
-            c_prc = obter_primeira_coluna(df_pc_raw, ['PRC UNITARIO', 'PRECO UNITARIO', 'PRECO', 'PREÇO', 'UNITARIO', 'VLR.UNIT', 'C7_PRECO'])
-            c_enc = obter_primeira_coluna(df_pc_raw, ['PED. ENCERR.', 'ENCERR', 'C7_ENCERR'])
-            c_elim = obter_primeira_coluna(df_pc_raw, ['RESID. ELIM.', 'ELIM', 'C7_RESIDUO'])
-            c_qtd = obter_primeira_coluna(df_pc_raw, ['QUANTIDADE', 'QTD', 'C7_QUANT'])
-            c_ent = obter_primeira_coluna(df_pc_raw, ['QTD.ENTREGUE', 'ENTREGUE', 'C7_QUJE'])
-            c_prod = obter_primeira_coluna(df_pc_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'CÓD. PRODUTO', 'C7_PRODUTO'])
+            c_prc = obter_primeira_coluna(df_pc_raw, ['PRC UNITARIO', 'PRECO UNITARIO', 'PRECO', 'PREÇO', 'UNITARIO', 'VLR.UNIT'])
+            c_enc = obter_primeira_coluna(df_pc_raw, ['PED. ENCERR.', 'ENCERR'])
+            c_elim = obter_primeira_coluna(df_pc_raw, ['RESID. ELIM.', 'ELIM'])
+            c_qtd = obter_primeira_coluna(df_pc_raw, ['QUANTIDADE', 'QTD'])
+            c_ent = obter_primeira_coluna(df_pc_raw, ['QTD.ENTREGUE', 'ENTREGUE'])
+            c_prod = obter_primeira_coluna(df_pc_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'CÓD. PRODUTO'])
 
             if not c_num: raise KeyError("Coluna de Pedido não encontrada no PC.")
+            if not c_barras_pc: raise KeyError("Coluna de Barras/EAN não encontrada no PC.")
 
             df_pc = pd.DataFrame()
             df_pc['Numero PC'] = df_pc_raw[c_num].astype(str).str.replace(r'\.0$', '', regex=True).apply(limpar_zeros_pedido)
-            # Zfill(13) nos códigos de barras do pedido
-            if c_barras_pc:
-                df_pc['Cod Barras'] = df_pc_raw[c_barras_pc].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip().apply(lambda x: x.zfill(13) if x else "")
-            else:
-                df_pc['Cod Barras'] = ""
-                
+            df_pc['Cod Barras'] = df_pc_raw[c_barras_pc].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip()
             df_pc['Prc Unitario'] = pd.to_numeric(df_pc_raw[c_prc], errors='coerce').fillna(0.0) if c_prc else 0.0
             df_pc['Produto'] = df_pc_raw[c_prod].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
             
@@ -104,42 +97,17 @@ def carregar_bases():
         st.error(f"Erro interno ao ler a Base de Pedidos (PC): {e}")
         df_pc = pd.DataFrame()
         
-    # 3. Base SLK (Barras Adicionais)
     try:
-        df_barras_raw = conn.query("SELECT * FROM base_slk", ttl=0).astype(str)
-        if not df_barras_raw.empty:
-            df_barras_raw.columns = [str(c).upper().strip() for c in df_barras_raw.columns]
-            df_barras = pd.DataFrame()
-            c_ean = obter_primeira_coluna(df_barras_raw, ['EAN', 'CODIGO DE BARRAS', 'BARRAS'])
-            c_cod = obter_primeira_coluna(df_barras_raw, ['CODIGO INTERNO', 'PRODUTO', 'CODIGO'])
-            if c_ean:
-                df_barras['EAN'] = df_barras_raw[c_ean].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip().apply(lambda x: x.zfill(13) if x else "")
-            if c_cod:
-                df_barras['CODIGO INTERNO'] = df_barras_raw[c_cod].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip()
-        else:
-            df_barras = pd.DataFrame()
+        df_barras = conn.query("SELECT * FROM barras_adicionais", ttl=0).astype(str)
+        if not df_barras.empty:
+            if 'EAN' in df_barras.columns:
+                df_barras['EAN'] = df_barras['EAN'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     except Exception as e:
         df_barras = pd.DataFrame()
         
-    # 4. Base Curva ABC (Alerta de Ruptura)
-    try:
-        df_curva_raw = conn.query("SELECT * FROM base_curva_abc", ttl=0).astype(str)
-        if not df_curva_raw.empty:
-            df_curva_raw.columns = [str(c).upper().strip() for c in df_curva_raw.columns]
-            c_cod = obter_primeira_coluna(df_curva_raw, ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO'])
-            c_cur = obter_primeira_coluna(df_curva_raw, ['CURVA ABC', 'CURVA', 'CLASSIFICAÇÃO', 'CLASS'])
-            df_curva = pd.DataFrame()
-            if c_cod and c_cur:
-                df_curva['CODIGO'] = df_curva_raw[c_cod].astype(str).replace(r'\.0$', '', regex=True).str.strip()
-                df_curva['CURVA'] = df_curva_raw[c_cur].astype(str).str.strip().str.upper()
-        else:
-            df_curva = pd.DataFrame()
-    except:
-        df_curva = pd.DataFrame()
-        
-    return df_cad, df_pc, df_barras, df_curva
+    return df_cad, df_pc, df_barras
 
-df_cad, df_pc, df_barras, df_curva = carregar_bases()
+df_cad, df_pc, df_barras = carregar_bases()
 
 if df_pc.empty or df_cad.empty:
     st.warning("⚠️ Cofre incompleto. Sincronize o SB1 e o PC (Base de Pedidos) na Central de Bases.")
@@ -223,9 +191,7 @@ def processar_novos_xmls(xml_files, df_existente):
             ean_node = prod.find('nfe:cEANTrib', namespaces)
             if ean_node is None or not ean_node.text: ean_node = prod.find('nfe:cEAN', namespaces)
             ean = ean_node.text or ""
-            # MELHORIA: XML também já recebe Zfill(13) na leitura 
             ean_clean = str(ean).strip()
-            ean_clean = ean_clean.zfill(13) if ean_clean and ean_clean.upper() != "SEM GTIN" else ""
             
             qCom = float(prod.find('nfe:qCom', namespaces).text)
             vUnCom = float(prod.find('nfe:vUnCom', namespaces).text)
@@ -286,23 +252,21 @@ def recalcular_pendentes(df):
         if row.get('Finalizado', False) == True: continue 
             
         ean_raw = re.sub(r'\.0$', '', str(row.get('EAN', ''))).strip()
-        # MELHORIA: Zfill(13) usado para busca na nuvem, assegurando correspondência
-        ean_clean = ean_raw.zfill(13) if ean_raw.lower() not in ['nan', 'none', ''] else ""
+        ean_clean = ean_raw.lstrip('0') if ean_raw.lower() not in ['nan', 'none', ''] else ""
         
         qCom = float(row.get('QTDE', 0)) 
         vUnCom = float(row.get('Custo XML Raw', 0)) 
         
         cod_interno_manual = re.sub(r'\.0$', '', str(row.get('Código Interno', ''))).strip()
-        # Mantenho o lstrip('0') APENAS para os códigos internos que variam
         cod_interno = cod_interno_manual.lstrip('0') if cod_interno_manual.lower() not in ['nan', 'none', ''] else ""
         
         if not cod_interno and not df_barras.empty and ean_clean and 'EAN' in df_barras.columns:
-            m_barra = df_barras[df_barras['EAN'] == ean_clean]
+            m_barra = df_barras[df_barras['EAN'].astype(str).str.lstrip('0') == ean_clean]
             if not m_barra.empty and 'CODIGO INTERNO' in m_barra.columns: 
                 cod_interno = str(m_barra['CODIGO INTERNO'].iloc[0]).strip().lstrip('0')
             
         if not cod_interno and not df_cad.empty and ean_clean and 'CÓDIGO DE BARRAS' in df_cad.columns:
-            m_cad = df_cad[df_cad['CÓDIGO DE BARRAS'] == ean_clean]
+            m_cad = df_cad[df_cad['CÓDIGO DE BARRAS'].astype(str).str.lstrip('0') == ean_clean]
             if not m_cad.empty and 'CÓDIGO INTERNO' in m_cad.columns: 
                 cod_interno = str(m_cad['CÓDIGO INTERNO'].iloc[0]).strip().lstrip('0')
 
@@ -331,7 +295,7 @@ def recalcular_pendentes(df):
         
         if final_po != "Sem Pedido":
             if ean_clean:
-                match_pc = df_pc[(df_pc['Numero PC'].astype(str) == final_po) & (df_pc['Cod Barras'] == ean_clean)]
+                match_pc = df_pc[(df_pc['Numero PC'].astype(str) == final_po) & (df_pc['Cod Barras'].astype(str).str.lstrip('0') == ean_clean)]
             
             if not match_pc.empty and not cod_interno and 'Produto' in match_pc.columns:
                 cod_interno = str(match_pc['Produto'].iloc[0]).strip().lstrip('0')
@@ -357,7 +321,7 @@ def recalcular_pendentes(df):
         
         if not df_cad.empty:
             if ean_clean and 'CÓDIGO DE BARRAS' in df_cad.columns:
-                match_cad = df_cad[df_cad['CÓDIGO DE BARRAS'] == ean_clean]
+                match_cad = df_cad[df_cad['CÓDIGO DE BARRAS'].astype(str).str.lstrip('0') == ean_clean]
             
             if match_cad.empty and cod_interno and 'CÓDIGO INTERNO' in df_cad.columns:
                 match_cad = df_cad[df_cad['CÓDIGO INTERNO'].astype(str).str.lstrip('0') == cod_interno]
@@ -370,14 +334,6 @@ def recalcular_pendentes(df):
                 val_desc = match_cad['DESCRIÇÃO SB1'].iloc[0]
                 if pd.notna(val_desc) and str(val_desc).strip().lower() not in ['nan', 'none', '', '']:
                     desc_sb1 = str(val_desc).strip()
-                    
-        # MELHORIA: ALERTA DE CURVA ABC (RUPTURA)
-        if cod_interno and not df_curva.empty and 'CODIGO' in df_curva.columns:
-            m_curva = df_curva[df_curva['CODIGO'].astype(str).str.lstrip('0') == cod_interno]
-            if not m_curva.empty:
-                curva_val = str(m_curva['CURVA'].iloc[0]).strip().upper()
-                if curva_val == 'A':
-                    avisos_list.append("🚨 ALERTA RUPTURA (Curva A)")
             
         fator_ajustado = pd.to_numeric(row.get('FATOR AJUSTADO', 0), errors='coerce')
         fator_ativo = fator_cadastro if pd.isna(fator_ajustado) or fator_ajustado <= 0 else int(fator_ajustado)
@@ -429,15 +385,14 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
             cod_interno = cod_interno_manual.lstrip('0') if cod_interno_manual.lower() not in ['nan', 'none', ''] else ""
             
             ean_raw = re.sub(r'\.0$', '', str(df_base.at[real_idx, 'EAN'])).strip()
-            # MELHORIA: Zfill no split manual de pedidos também
-            ean_clean = ean_raw.zfill(13) if ean_raw.lower() not in ['nan', 'none', ''] else ""
+            ean_clean = ean_raw.lstrip('0') if ean_raw.lower() not in ['nan', 'none', ''] else ""
             
             if not cod_interno and not df_barras.empty and ean_clean and 'EAN' in df_barras.columns:
-                m_barra = df_barras[df_barras['EAN'] == ean_clean]
+                m_barra = df_barras[df_barras['EAN'].astype(str).str.lstrip('0') == ean_clean]
                 if not m_barra.empty and 'CODIGO INTERNO' in m_barra.columns: 
                     cod_interno = str(m_barra['CODIGO INTERNO'].iloc[0]).strip().lstrip('0')
             if not cod_interno and not df_cad.empty and ean_clean and 'CÓDIGO DE BARRAS' in df_cad.columns:
-                m_cad = df_cad[df_cad['CÓDIGO DE BARRAS'] == ean_clean]
+                m_cad = df_cad[df_cad['CÓDIGO DE BARRAS'].astype(str).str.lstrip('0') == ean_clean]
                 if not m_cad.empty and 'CÓDIGO INTERNO' in m_cad.columns: 
                     cod_interno = str(m_cad['CÓDIGO INTERNO'].iloc[0]).strip().lstrip('0')
                     
@@ -448,7 +403,7 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                 match_cad = pd.DataFrame()
                 if not df_cad.empty:
                     if ean_clean and 'CÓDIGO DE BARRAS' in df_cad.columns:
-                        match_cad = df_cad[df_cad['CÓDIGO DE BARRAS'] == ean_clean]
+                        match_cad = df_cad[df_cad['CÓDIGO DE BARRAS'].astype(str).str.lstrip('0') == ean_clean]
                     if match_cad.empty and cod_interno and 'CÓDIGO INTERNO' in df_cad.columns:
                         match_cad = df_cad[df_cad['CÓDIGO INTERNO'].astype(str).str.lstrip('0') == cod_interno]
                         
@@ -466,7 +421,7 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                     saldo_pc = 0.0
                     match_pc = pd.DataFrame()
                     if ean_clean:
-                        match_pc = df_pc[(df_pc['Numero PC'].astype(str) == p) & (df_pc['Cod Barras'] == ean_clean)]
+                        match_pc = df_pc[(df_pc['Numero PC'].astype(str) == p) & (df_pc['Cod Barras'].astype(str).str.lstrip('0') == ean_clean)]
                     if match_pc.empty and cod_interno and 'Produto' in df_pc.columns:
                         match_pc = df_pc[(df_pc['Numero PC'].astype(str) == p) & (df_pc['Produto'].astype(str).str.lstrip('0') == cod_interno)]
                     if not match_pc.empty: saldo_pc = float(match_pc['Saldo Disponivel'].iloc[0])
