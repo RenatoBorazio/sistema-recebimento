@@ -9,15 +9,15 @@ st.markdown("Faça o upload dos relatórios do Protheus. Eles serão atualizados
 # 1. Conectando ao Banco de Dados 
 conn = st.connection("supabase", type="sql")
 
-# 2. Mapeamento das bases
+# 2. Mapeamento das bases (Curva ABC adicionada)
 bases_esperadas = {
     "Cadastro de Produtos (SB1)": "cadastro_produtos",
     "Base de Pedidos (PC)": "base_pedidos",
     "Estoque Inicial": "estoque_inicial",
     "Notas Pendentes (SD1)": "sd1_pendente",
-    "Códigos de Barras Adicionais": "barras_adicionais"
+    "Códigos de Barras Adicionais": "barras_adicionais",
+    "Curva ABC": "base_curva_abc"
 }
-
 
 def detectar_separador(arquivo_enviado, encoding):
     """Detecta se o arquivo usa ';' ou ',' olhando a primeira linha.
@@ -26,7 +26,6 @@ def detectar_separador(arquivo_enviado, encoding):
     primeira_linha = arquivo_enviado.readline().decode(encoding, errors='ignore')
     arquivo_enviado.seek(0)
     return ';' if primeira_linha.count(';') >= primeira_linha.count(',') else ','
-
 
 def deduplicar_colunas(colunas):
     """Renomeia colunas repetidas para evitar erro no banco (ex: relatórios
@@ -43,7 +42,6 @@ def deduplicar_colunas(colunas):
             contagem[nome] += 1
             novas.append(f"{nome}.{contagem[nome]}")
     return novas
-
 
 st.divider()
 
@@ -90,7 +88,6 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                     # ------------------------------------------
 
                     # Evita erro no banco quando o relatório repete o nome de uma coluna
-                    # (ex: 'Qtd. Fim Mes' aparecendo uma vez por depósito/filial)
                     df.columns = deduplicar_colunas(df.columns)
 
                     df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False)
