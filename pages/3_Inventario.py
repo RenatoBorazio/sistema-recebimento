@@ -22,13 +22,35 @@ def salvar_historico_nuvem(df):
     except:
         df.to_sql("historico_inventario", con=conn.engine, if_exists='replace', index=False)
 
+def salvar_pendentes_nuvem(df):
+    try:
+        with conn.session as s:
+            s.execute(text("DELETE FROM inventario_pendente"))
+            s.commit()
+        if not df.empty:
+            df.to_sql("inventario_pendente", con=conn.engine, if_exists='append', index=False)
+    except:
+        if not df.empty:
+            df.to_sql("inventario_pendente", con=conn.engine, if_exists='replace', index=False)
+
+def carregar_pendentes():
+    try:
+        return conn.query("SELECT * FROM inventario_pendente", ttl=0)
+    except:
+        return pd.DataFrame()
+
+def carregar_historico():
+    try:
+        return conn.query("SELECT * FROM historico_inventario", ttl=0)
+    except:
+        return pd.DataFrame()
+
 def obter_primeira_coluna(df, nomes_possiveis):
     for nome in nomes_possiveis:
         if nome in df.columns: return nome
     return None
 
 def safe_numeric(series):
-    """Tradutor matemático: transforma números BR (1.234,50) para cálculo internacional (1234.50) sem quebrar"""
     s = series.astype(str).str.strip()
     s = s.apply(lambda x: x.replace('.', '').replace(',', '.') if ',' in x else x)
     return pd.to_numeric(s, errors='coerce').fillna(0.0)
@@ -44,9 +66,9 @@ try:
         c_custo_st = obter_primeira_coluna(df_cad_raw, ['CUSTO STAND', 'CUSTO STAND.', 'ULT. PRECO', 'ULTIMO PRECO', 'PRECO VENDA'])
         
         df_cad = pd.DataFrame()
-        df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
-        df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
-        df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', '<NA>'], '').str.strip() if c_desc else ""
+        df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
+        df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
+        df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', ''], '').str.strip() if c_desc else ""
         df_cad['CUSTO STAND'] = safe_numeric(df_cad_raw[c_custo_st]) if c_custo_st else 0.0
     else:
         df_cad = pd.DataFrame()
@@ -71,13 +93,10 @@ try:
         c_saldo = obter_primeira_coluna(df_est_raw, ['SALDO INICIAL', 'SALDO', 'QTD INICIAL', 'QUANTIDADE', 'B2_QATU', 'B7_QUANT', 'QTD', 'SALDO ATUAL', 'ESTOQUE'])
         c_custo = obter_primeira_coluna(df_est_raw, ['CUSTO UNITARIO', 'CUSTO UNITÁRIO', 'CUSTO', 'CM1', 'B2_CM1', 'CUSTO MEDIO', 'CUSTO MÉDIO', 'VALOR UNITARIO', 'VALOR UNITÁRIO'])
         
-        if not c_saldo or not c_prod:
-            st.warning("⚠️ *Aviso de Diagnóstico:* O sistema carregou o seu arquivo de Estoque Inicial, mas não identificou as colunas de *Produto* ou *Saldo*. O cálculo pode dar Zero. Por favor, abra o seu Excel de estoque, renomeie os títulos das colunas para 'PRODUTO' e 'SALDO', e suba novamente na Central de Bases.")
-
         df_est = pd.DataFrame()
-        df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
-        df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
-        df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
+        df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
+        df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
+        df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
         df_est['Saldo Inicial'] = safe_numeric(df_est_raw[c_saldo]) if c_saldo else 0.0
         df_est['Custo Unitario'] = safe_numeric(df_est_raw[c_custo]) if c_custo else 0.0
     else:
@@ -89,17 +108,37 @@ try:
     df_sd1_raw = conn.query("SELECT * FROM sd1_pendente", ttl=0).astype(str)
     if not df_sd1_raw.empty:
         df_sd1_raw.columns = [str(c).upper().strip() for c in df_sd1_raw.columns]
-        
         c_filial_sd1 = obter_primeira_coluna(df_sd1_raw, ['FILIAL', 'D1_FILIAL'])
         c_prod_sd1 = obter_primeira_coluna(df_sd1_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'D1_COD'])
         
         df_sd1 = pd.DataFrame()
-        df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
-        df_sd1['Produto'] = df_sd1_raw[c_prod_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod_sd1 else ""
+        df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
+        df_sd1['Produto'] = df_sd1_raw[c_prod_sd1].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod_sd1 else ""
     else:
         df_sd1 = pd.DataFrame()
 except:
     df_sd1 = pd.DataFrame()
+
+try:
+    df_curva_raw = conn.query("SELECT * FROM base_curva_abc", ttl=0).astype(str)
+    if not df_curva_raw.empty:
+        df_curva_raw.columns = [str(c).upper().strip() for c in df_curva_raw.columns]
+        c_cod_curva = obter_primeira_coluna(df_curva_raw, ['CODIGO', 'CÓDIGO', 'PRODUTO', 'CÓDIGO INTERNO'])
+        c_curva = obter_primeira_coluna(df_curva_raw, ['CURVA', 'CURVA ABC'])
+        c_filial_curva = obter_primeira_coluna(df_curva_raw, ['FILIAL', 'LOJA'])
+        
+        df_curva = pd.DataFrame()
+        if c_cod_curva and c_curva:
+            df_curva['CODIGO'] = df_curva_raw[c_cod_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip()
+            df_curva['CURVA'] = df_curva_raw[c_curva].astype(str).str.strip().str.upper()
+            if c_filial_curva:
+                df_curva['FILIAL'] = df_curva_raw[c_filial_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip()
+            else:
+                df_curva['FILIAL'] = ""
+    else:
+        df_curva = pd.DataFrame()
+except:
+    df_curva = pd.DataFrame()
 
 def checar_bases():
     faltantes = []
@@ -110,12 +149,6 @@ def checar_bases():
 if checar_bases():
     st.warning(f"⚠️ Cofre incompleto para Inventário. Vá na Central de Bases e sincronize: {', '.join(checar_bases())}")
     st.stop()
-
-def carregar_historico():
-    try:
-        return conn.query("SELECT * FROM historico_inventario", ttl=0)
-    except:
-        return pd.DataFrame()
 
 def padronizar_colunas(df_bruto, nome_coluna_alvo):
     df = df_bruto.copy()
@@ -154,6 +187,17 @@ def padronizar_colunas(df_bruto, nome_coluna_alvo):
         return df_ret
     return pd.DataFrame()
 
+def processar_multiplos_arquivos(arquivos, nome_alvo):
+    df_tot = pd.DataFrame()
+    for f in arquivos:
+        try:
+            tmp = pd.read_csv(f, sep=';', encoding='latin1') if f.name.endswith('.csv') else pd.read_excel(f)
+            tmp_p = padronizar_colunas(tmp, nome_alvo)
+            df_tot = pd.concat([df_tot, tmp_p], ignore_index=True)
+        except Exception as e:
+            st.error(f"Erro ao ler arquivo {f.name}: {e}")
+    return df_tot
+
 # --- MOTOR DO INVENTÁRIO ---
 def processar_contagem(df_contagem):
     resultados = []
@@ -175,7 +219,7 @@ def processar_contagem(df_contagem):
             
         val_c2 = row.get('CONTAGEM 2')
         is_recontado = False
-        if pd.notna(val_c2) and str(val_c2).strip() != '':
+        if pd.notna(val_c2) and str(val_c2).strip() not in ['', 'nan', 'None', '']:
             val_c2_str = str(val_c2)
             if ',' in val_c2_str: val_c2_str = val_c2_str.replace('.', '').replace(',', '.')
             contagem_2 = pd.to_numeric(val_c2_str, errors='coerce')
@@ -209,6 +253,19 @@ def processar_contagem(df_contagem):
         
         if not cod_interno: cod_interno = codigo_informado 
         if not ean_oficial_sb1: ean_oficial_sb1 = codigo_informado 
+
+        # --- BUSCANDO A CURVA ABC POR FILIAL ---
+        curva_abc = "C" # Padrão é C
+        if cod_interno and not df_curva.empty and 'CODIGO' in df_curva.columns:
+            if 'FILIAL' in df_curva.columns and not df_curva['FILIAL'].eq("").all():
+                m_curva = df_curva[(df_curva['CODIGO'] == cod_interno) & (df_curva['FILIAL'] == filial)]
+            else:
+                m_curva = df_curva[df_curva['CODIGO'] == cod_interno]
+                
+            if not m_curva.empty:
+                curva_val = str(m_curva['CURVA'].iloc[0]).strip().upper()
+                if curva_val in ['A', 'B', 'C']:
+                    curva_abc = curva_val
             
         disponivel = "SIM"
         if not df_sd1.empty:
@@ -251,6 +308,7 @@ def processar_contagem(df_contagem):
             "EAN OFICIAL (SB1)": ean_oficial_sb1,
             "DISPONIVEL PARA INVENTARIO?": disponivel,
             "DESCRIÇÃO": descricao,
+            "CURVA": curva_abc, 
             "SALDO INICIAL": saldo_inicial,
             "CUSTO UNITARIO": round(custo_unitario, 4),
             "VALOR INICIAL": round(valor_inicial, 2),
@@ -267,75 +325,81 @@ def processar_contagem(df_contagem):
     return pd.DataFrame(resultados)
 
 # --- INTERFACE E TABS ---
-aba1, aba2, aba3, aba4 = st.tabs(["📊 Nova Apuração (Dia)", "📈 Resultados Gerenciais (Fixo)", "📅 Reporte Semanal", "🔒 Pendentes (SD1)"])
+aba1, aba2, aba3, aba4 = st.tabs(["⏳ Contagens em Andamento", "📈 Resultados Gerenciais (Fixo)", "📅 Reporte Semanal", "🔒 Pendentes (SD1)"])
 
 with st.sidebar:
-    st.header("1. Upload de Contagem")
-    st.info("Suba os arquivos da loja. Envie a Recontagem se houver.")
+    st.header("📥 Iniciar Nova Apuração")
+    st.info("Suba os arquivos da 1ª Contagem. Eles ficarão salvos na nuvem aguardando a finalização ou recontagem.")
     arq_contagem_1 = st.file_uploader("Upload: 1ª Contagem", type=["xlsx", "xls", "csv"], accept_multiple_files=True)
-    st.divider()
-    arq_contagem_2 = st.file_uploader("Upload: 2ª Contagem (Recontagem)", type=["xlsx", "xls", "csv"], accept_multiple_files=True)
-
-df_res_atual = pd.DataFrame()
-
-# --- PROCESSAMENTO SE HOUVER UPLOAD ---
-if arq_contagem_1 or arq_contagem_2:
-    df_c1 = pd.DataFrame()
-    df_c2 = pd.DataFrame()
-    
     if arq_contagem_1:
-        for file in arq_contagem_1:
-            try:
-                tmp = pd.read_csv(file, sep=';', encoding='latin1') if file.name.endswith('.csv') else pd.read_excel(file)
-                tmp_padrao = padronizar_colunas(tmp, 'CONTAGEM 1')
-                df_c1 = pd.concat([df_c1, tmp_padrao], ignore_index=True)
-            except: st.error(f"Erro ao ler arquivo: {file.name}")
+        if st.button("➕ Salvar 1ª Contagem", type="primary", use_container_width=True):
+            with st.spinner("Salvando contagem inicial na nuvem..."):
+                df_c1 = processar_multiplos_arquivos(arq_contagem_1, 'CONTAGEM 1')
+                if not df_c1.empty:
+                    df_pend = carregar_pendentes()
+                    df_novo = pd.concat([df_pend, df_c1]).drop_duplicates(subset=['Filial', 'ARMAZEM', 'INFORMAR CODIGO'], keep='last')
+                    salvar_pendentes_nuvem(df_novo)
+                    st.success("Salvo na nuvem com sucesso!")
+                    st.rerun()
 
-    if arq_contagem_2:
-        for file in arq_contagem_2:
-            try:
-                tmp = pd.read_csv(file, sep=';', encoding='latin1') if file.name.endswith('.csv') else pd.read_excel(file)
-                tmp_padrao = padronizar_colunas(tmp, 'CONTAGEM 2')
-                df_c2 = pd.concat([df_c2, tmp_padrao], ignore_index=True)
-            except: st.error(f"Erro ao ler arquivo: {file.name}")
-            
-    df_completo = pd.DataFrame()
-    if not df_c1.empty and not df_c2.empty:
-        df_completo = pd.merge(df_c1, df_c2, on=['Filial', 'INFORMAR CODIGO', 'ARMAZEM'], how='outer')
-    elif not df_c1.empty: df_completo = df_c1
-    elif not df_c2.empty:
-        df_completo = df_c2
-        df_completo = df_completo.rename(columns={'CONTAGEM 2': 'CONTAGEM 1'})
-        
-    if not df_completo.empty:
-        with st.spinner("Realizando o Merge e apurando divergências com Estoque na nuvem..."):
-            df_res_atual = processar_contagem(df_completo)
+    st.divider()
+    st.header("⚙️ Administração")
+    if st.button("🗑️ Limpar Todas as Contagens Pendentes"):
+        salvar_pendentes_nuvem(pd.DataFrame())
+        st.success("Contagens pendentes limpas.")
+        st.rerun()
 
-# --- ABA 1: NOVA APURAÇÃO DO DIA ---
+df_pendentes = carregar_pendentes()
+df_res_pendentes_global = pd.DataFrame() # Usado na Aba 4
+
+# --- ABA 1: NOVA APURAÇÃO DO DIA (EM ANDAMENTO) ---
 with aba1:
-    if not df_res_atual.empty:
-        st.success("✅ Base de Inventário Processada!")
-        st.markdown("### Árvore de Contagens por Filial")
+    if not df_pendentes.empty:
+        st.markdown("### Árvore de Contagens Pendentes")
+        filiais_pendentes = sorted(df_pendentes['Filial'].astype(str).unique())
         
-        df_view = df_res_atual.copy()
-        df_view['%DIV QTDE'] = (df_view['%DIV QTDE'] * 100).map("{:.2f}%".format)
-        df_view['%DIV VALOR'] = (df_view['%DIV VALOR'] * 100).map("{:.2f}%".format)
+        lista_res_filiais = []
         
-        filiais_unicas_atuais = sorted(df_res_atual['FILIAL'].astype(str).unique())
-        
-        for filial in filiais_unicas_atuais:
-            df_filial = df_res_atual[df_res_atual['FILIAL'].astype(str) == filial]
-            df_filial_view = df_view[df_view['FILIAL'].astype(str) == filial]
-            
-            div_rs = df_filial['DIVERGENCIA DE VALOR'].sum()
-            div_pcs = df_filial['DIVERGENCIA DE SALDO'].sum()
-            
+        for filial in filiais_pendentes:
+            df_filial_c1 = df_pendentes[df_pendentes['Filial'] == filial].copy()
             st.subheader(f"🏢 Filial: {filial}")
             
-            with st.expander(f"📊 Ver Detalhes da Contagem | Divergência: R$ {div_rs:,.2f} ({div_pcs} un)", expanded=True):
-                st.dataframe(df_filial_view.drop(columns=['EAN OFICIAL (SB1)', 'FILIAL']), use_container_width=True, hide_index=True)
+            with st.expander(f"⚙️ Apuração Pendente ({len(df_filial_c1)} itens na 1ª Contagem)", expanded=True):
                 
-                df_recontagem = df_filial[(df_filial['DIVERGENCIA DE SALDO'] != 0) & (df_filial['DISPONIVEL PARA INVENTARIO?'] == 'SIM')].copy()
+                col_del, _ = st.columns([2, 8])
+                with col_del:
+                    if st.button(f"🗑️ Excluir Contagem ({filial})", key=f"del_c1_{filial}"):
+                        df_pend_new = df_pendentes[df_pendentes['Filial'] != filial]
+                        salvar_pendentes_nuvem(df_pend_new)
+                        st.rerun()
+                
+                st.markdown("#### 1. Importar Recontagem (Opcional)")
+                arq_c2 = st.file_uploader(f"Anexar 2ª Contagem ({filial})", type=["xlsx", "xls", "csv"], accept_multiple_files=True, key=f"up_c2_{filial}")
+                
+                df_base_apuracao = df_filial_c1.copy()
+                
+                if arq_c2:
+                    df_c2 = processar_multiplos_arquivos(arq_c2, 'CONTAGEM 2')
+                    if not df_c2.empty:
+                        df_base_apuracao = pd.merge(df_base_apuracao, df_c2, on=['Filial', 'INFORMAR CODIGO', 'ARMAZEM'], how='outer')
+                
+                with st.spinner("Processando Apuração..."):
+                    df_res = processar_contagem(df_base_apuracao)
+                    lista_res_filiais.append(df_res)
+                
+                # --- Exibição de Resultados ---
+                div_rs = df_res['DIVERGENCIA DE VALOR'].sum()
+                div_pcs = df_res['DIVERGENCIA DE SALDO'].sum()
+                
+                st.markdown(f"**Resultado Atual:** Divergência de R$ {div_rs:,.2f} ({div_pcs} un)")
+                
+                df_view = df_res.copy()
+                df_view['%DIV QTDE'] = (df_view['%DIV QTDE'] * 100).map("{:.2f}%".format)
+                df_view['%DIV VALOR'] = (df_view['%DIV VALOR'] * 100).map("{:.2f}%".format)
+                st.dataframe(df_view.drop(columns=['EAN OFICIAL (SB1)', 'FILIAL']), use_container_width=True, hide_index=True)
+                
+                # --- Botões de Relatórios ---
+                df_recontagem = df_res[(df_res['DIVERGENCIA DE SALDO'] != 0) & (df_res['DISPONIVEL PARA INVENTARIO?'] == 'SIM')].copy()
                 
                 col_btn1, col_btn2 = st.columns([1, 1])
                 with col_btn1:
@@ -346,6 +410,7 @@ with aba1:
                             'CODIGO INTERNO': df_recontagem['CODIGO INTERNO'],
                             'EAN': df_recontagem['EAN OFICIAL (SB1)'], 
                             'DESCRIÇÃO': df_recontagem['DESCRIÇÃO'],
+                            'CURVA ABC': df_recontagem['CURVA'],
                             '1ª Contagem': df_recontagem['CONTAGEM 1'],
                             'Div. 1ª Contagem': df_recontagem['DIV. 1ª CONTAGEM'],
                             '2ª Contagem': "", 
@@ -357,7 +422,7 @@ with aba1:
                             df_export_rec.to_excel(writer, sheet_name=f"Recontagem_{filial}", index=False)
                         
                         st.download_button(
-                            f"🔄 Baixar Formulário de Recontagem ({filial})", 
+                            f"🔄 Formulário de Recontagem ({filial})", 
                             data=output_rec.getvalue(), 
                             file_name=f"Planilha_Recontagem_{filial}.xlsx", 
                             type="secondary",
@@ -368,9 +433,7 @@ with aba1:
                         st.success("🎉 Não há divergências nesta filial! Nenhuma recontagem necessária.")
                         
                 with col_btn2:
-                    # NOVA REGRA: Apenas itens disponíveis e COM divergência vão para o Protheus!
-                    df_protheus_source = df_filial[(df_filial['DISPONIVEL PARA INVENTARIO?'] == 'SIM') & (df_filial['DIVERGENCIA DE SALDO'] != 0)]
-                    
+                    df_protheus_source = df_res[(df_res['DISPONIVEL PARA INVENTARIO?'] == 'SIM') & (df_res['DIVERGENCIA DE SALDO'] != 0)]
                     if not df_protheus_source.empty:
                         df_protheus = pd.DataFrame({
                             'B7_FILIAL': df_protheus_source['FILIAL'],
@@ -378,7 +441,6 @@ with aba1:
                             'B7_COD': df_protheus_source['CODIGO INTERNO'],
                             'B7_LOCAL': df_protheus_source['ARMAZEM'].astype(str).str.replace(r'\.0$', '', regex=True).apply(lambda x: x.zfill(2))
                         })
-                        
                         output_prot = io.StringIO()
                         df_protheus.to_csv(output_prot, sep=';', index=False, encoding='utf-8-sig')
                         
@@ -392,47 +454,43 @@ with aba1:
                         )
                     else:
                         st.success("🟢 100% Batido! Não há divergências para exportar ao Protheus.")
+                
+                st.markdown("---")
+                st.markdown("#### 2. Finalizar e Gravar no Histórico")
+                with st.form(key=f"form_fin_{filial}"):
+                    c_p1, c_p2 = st.columns(2)
+                    with c_p1:
+                        per_input = st.text_input("Período (Ex: P9):", value="P9", key=f"per_{filial}")
+                    with c_p2:
+                        dt_input = st.date_input("Data do Inventário:", value=datetime.date.today(), key=f"dt_{filial}")
                         
-        st.divider()
-        st.markdown("### 💾 Ações Globais")
-        
-        output_base = io.BytesIO()
-        with pd.ExcelWriter(output_base, engine='openpyxl') as writer:
-            df_res_atual.to_excel(writer, sheet_name="INVENTARIO_CALCULADO", index=False)
-        st.download_button("📥 Baixar Base Completa de Todas as Filiais (Para Colar no P9)", data=output_base.getvalue(), file_name="Inventario_Base_Completa.xlsx", type="secondary")
+                    btn_fin = st.form_submit_button("✅ Gravar Oficialmente e Encerrar", type="primary", use_container_width=True)
+                    if btn_fin:
+                        df_hist = carregar_historico()
+                        df_salvar = df_res.copy()
+                        df_salvar['DATA'] = str(dt_input)
+                        df_salvar.insert(0, 'PERIODO', str(per_input))
+                        
+                        # Limpa histórico antigo se a pessoa estiver sobrepondo
+                        if not df_hist.empty:
+                            df_hist = df_hist[~((df_hist['PERIODO'].astype(str) == str(per_input)) & 
+                                                (df_hist['DATA'].astype(str) == str(dt_input)) & 
+                                                (df_hist['FILIAL'].astype(str) == filial))]
+                                                
+                        df_hist_novo = pd.concat([df_hist, df_salvar], ignore_index=True)
+                        salvar_historico_nuvem(df_hist_novo)
+                        
+                        # Remove a contagem dos pendentes
+                        df_pend_new = df_pendentes[df_pendentes['Filial'] != filial]
+                        salvar_pendentes_nuvem(df_pend_new)
+                        
+                        st.success(f"Inventário da filial {filial} gravado com sucesso!")
+                        st.rerun()
 
-        st.markdown("#### Gravar Resultados no Histórico (Nuvem)")
-        st.write("Após revisar, salve esta contagem no banco de dados para alimentar os Resultados Gerenciais.")
-        
-        col_p1, col_p2, col_p3 = st.columns([1, 1, 2])
-        with col_p1:
-            periodo_input = st.text_input("Período (Ex: P9, P10):", value="P9")
-        with col_p2:
-            data_inv_input = st.date_input("Data do Inventário:", value=datetime.date.today())
-        with col_p3:
-            st.write("")
-            st.write("")
-            if st.button("Gravar Inventário Oficialmente", type="primary", use_container_width=True):
-                df_hist = carregar_historico()
-                filiais_atuais = df_res_atual['FILIAL'].astype(str).unique()
-                
-                if not df_hist.empty:
-                    df_hist = df_hist[~((df_hist['PERIODO'].astype(str) == str(periodo_input)) & 
-                                        (df_hist['DATA'].astype(str) == str(data_inv_input)) & 
-                                        (df_hist['FILIAL'].astype(str).isin(filiais_atuais)))]
-                
-                df_salvar = df_res_atual.copy()
-                df_salvar['DATA'] = str(data_inv_input)
-                df_salvar.insert(0, 'PERIODO', str(periodo_input))
-                
-                df_hist_novo = pd.concat([df_hist, df_salvar], ignore_index=True)
-                
-                salvar_historico_nuvem(df_hist_novo)
-                
-                st.success(f"Inventário salvo com sucesso no banco de dados corporativo (Período {periodo_input})!")
-                st.rerun()
+        if lista_res_filiais:
+            df_res_pendentes_global = pd.concat(lista_res_filiais, ignore_index=True)
     else:
-        st.info("Faça o upload dos arquivos de contagem na barra lateral para iniciar a apuração do dia.")
+        st.info("Nenhuma contagem em andamento. Inicie fazendo o upload da 1ª contagem no menu lateral.")
 
 # --- ABA 2: RESULTADOS GERENCIAIS (SEMPRE FIXA) ---
 with aba2:
@@ -493,7 +551,7 @@ with aba2:
                             "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                            "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. VALOR R\(": f"R\) {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
                         
@@ -517,7 +575,7 @@ with aba2:
                             "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                            "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. VALOR R\(": f"R\) {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
                         
@@ -661,7 +719,7 @@ with aba3:
             
             st.markdown("---")
             st.markdown("#### 📧 E-mail Executivo Gerado")
-            st.info("💡 Arraste o mouse sobre o quadro tracejado abaixo, aperte *Ctrl+C* e cole direto no corpo do seu Outlook! Os cálculos são automáticos baseados na semana selecionada.")
+            st.info("💡 Para não quebrar o layout do sistema, o HTML do e-mail foi isolado. Clique no botão abaixo para baixar o arquivo, abra no seu navegador (Chrome/Edge), copie a página toda e cole no Outlook!")
             
             df_email = df_hist_limpo[df_hist_limpo['DATA'].isin([d.strftime('%Y-%m-%d') for d in dates])].copy()
             for c in ['VALOR INICIAL', 'SALDO INICIAL', 'DIVERGENCIA DE SALDO', 'DIVERGENCIA DE VALOR', 'CONTAGEM FINAL']:
@@ -694,52 +752,54 @@ with aba3:
                 
                 tipo_mov_vol = "uma redução" if div_saldo < 0 else "um aumento"
                 
-                h = f"<h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;'>{titulo}</h4>\n"
-                h += "<ul style='margin-top: 5px; margin-bottom: 15px;'>\n"
-                h += f"<li>Dos <b>{skus_totais}</b> SKUs inventariados, <b>{skus_div}</b> apresentaram divergências, representando aproximadamente <b>{perc_skus_div:.0f}%</b> da lista.</li>\n"
+                h = f"[[h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;']]{titulo}[[/h4]]\n"
+                h += "[[ul style='margin-top: 5px; margin-bottom: 15px;']]\n"
+                h += f"[[li]]Dos [[b]]{skus_totais}[[/b]] SKUs inventariados, [[b]]{skus_div}[[/b]] apresentaram divergências, representando aproximadamente [[b]]{perc_skus_div:.0f}%[[/b]] da lista.[[/li]]\n"
                 
                 if round(div_valor, 2) != 0:
-                    h += f"<li>Foi identificada {tipo_mov_valor} de inventário no valor de <b>R$ {fmt_br(abs(div_valor), True)}</b>, {tipo_mov_estoque} o estoque de R$ {fmt_br(valor_inicial, True)} para R$ {fmt_br(valor_final, True)}, o que representa uma {tipo_baixa_alta} de <b>{perc_div_valor:.0f}%</b>.</li>\n"
+                    h += f"[[li]]Foi identificada {tipo_mov_valor} de inventário no valor de [[b]]R$ {fmt_br(abs(div_valor), True)}[[/b]], {tipo_mov_estoque} o estoque de R$ {fmt_br(valor_inicial, True)} para R$ {fmt_br(valor_final, True)}, o que representa uma {tipo_baixa_alta} de [[b]]{perc_div_valor:.0f}%[[/b]].[[/li]]\n"
                 else:
-                    h += f"<li>O valor do estoque se manteve em R$ {fmt_br(valor_inicial, True)}, sem perdas ou ganhos financeiros.</li>\n"
+                    h += f"[[li]]O valor do estoque se manteve em R$ {fmt_br(valor_inicial, True)}, sem perdas ou ganhos financeiros.[[/li]]\n"
                     
                 if round(div_saldo, 0) != 0:
-                    h += f"<li>Em volume, houve {tipo_mov_vol} de <b>{fmt_br(abs(div_saldo))}</b> unidades, fazendo o estoque passar de {fmt_br(saldo_inicial)} para {fmt_br(saldo_final)} unidades.</li>\n"
+                    h += f"[[li]]Em volume, houve {tipo_mov_vol} de [[b]]{fmt_br(abs(div_saldo))}[[/b]] unidades, fazendo o estoque passar de {fmt_br(saldo_inicial)} para {fmt_br(saldo_final)} unidades.[[/li]]\n"
                 else:
-                    h += f"<li>Em volume, o estoque geral de {fmt_br(saldo_inicial)} unidades foi mantido.</li>\n"
+                    h += f"[[li]]Em volume, o estoque geral de {fmt_br(saldo_inicial)} unidades foi mantido.[[/li]]\n"
                     
-                h += "</ul>\n"
-                return h
+                h += "[[/ul]]\n"
+                return h.replace("[[", "<").replace("]]", ">")
 
             indicadores_html = ""
             if not df_email.empty:
-                indicadores_html += "<div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #2e7bcf; margin: 20px 0;'>\n"
-                indicadores_html += "<h3 style='color: #2e7bcf; margin-bottom: 10px; margin-top: 0;'>📊 Resumo de Indicadores da Semana</h3>\n"
+                indicadores_html += "[[div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #2e7bcf; margin: 20px 0;']]\n"
+                indicadores_html += "[[h3 style='color: #2e7bcf; margin-bottom: 10px; margin-top: 0;']]📊 Resumo de Indicadores da Semana[[/h3]]\n"
                 indicadores_html += gerar_texto_indicadores(df_email, "Consolidado Geral (Todas as Filiais)")
                 for f_code in filiais_unicas:
                     df_fil = df_email[df_email['FILIAL'] == f_code]
                     if not df_fil.empty:
                         nome_filial = filiais_map.get(f_code, f"FILIAL {f_code}")
                         indicadores_html += gerar_texto_indicadores(df_fil, f"Resultado: {nome_filial}")
-                indicadores_html += "</div>\n"
+                indicadores_html += "[[/div]]\n"
+                indicadores_html = indicadores_html.replace("[[", "<").replace("]]", ">")
             
-            html_cal = '<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 15px; border: 2px dashed #999; border-radius: 5px;">\n'
-            html_cal += '<p>Boa tarde!</p>\n'
-            html_cal += '<p>Segue o resumo <span style="background-color: #ffff00; font-weight: bold;">semanal</span> dos inventários.</p>\n'
-            html_cal += '<p><b>Em anexo, seguem todos os itens ajustados da semana.</b></p>\n'
-            html_cal += '<p>Os ajustes são realizados após o envio da recontagem. Conforme alinhado, caso a contagem ou a recontagem não seja realizada, solicitamos o envio da justificativa correspondente.</p>\n'
+            html_cal = '[[meta charset="UTF-8"]]\n' 
+            html_cal += '[[div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 15px; border: 2px dashed #999; border-radius: 5px; max-width: 800px; margin: auto;"]]\n'
+            html_cal += '[[p]]Boa tarde![[/p]]\n'
+            html_cal += '[[p]]Segue o resumo [[span style="background-color: #ffff00; font-weight: bold;"]]semanal[[/span]] dos inventários.[[/p]]\n'
+            html_cal += '[[p]][[b]]Em anexo, seguem todos os itens ajustados da semana.[[/b]][[/p]]\n'
+            html_cal += '[[p]]Os ajustes são realizados após o envio da recontagem. Conforme alinhado, caso a contagem ou a recontagem não seja realizada, solicitamos o envio da justificativa correspondente.[[/p]]\n'
             html_cal += indicadores_html
-            html_cal += '<p>Calendário de contagens e recontagens por filial:</p>\n'
-            html_cal += '<table style="border-collapse: collapse; text-align: center; margin-top: 15px;">\n'
-            html_cal += '<tr><th style="border: none;"></th>\n'
+            html_cal += '[[p]]Calendário de contagens e recontagens por filial:[[/p]]\n'
+            html_cal += '[[table style="border-collapse: collapse; text-align: center; margin-top: 15px;"]]\n'
+            html_cal += '[[tr]][[th style="border: none;"]][[/th]]\n'
             
             for d in dates:
-                html_cal += f'<th colspan="2" style="border: 1px solid #ccc; padding: 8px 15px; background-color: #f2f2f2; font-size: 16px;">{d.day}</th>\n'
-            html_cal += '</tr>\n'
+                html_cal += f'[[th colspan="2" style="border: 1px solid #ccc; padding: 8px 15px; background-color: #f2f2f2; font-size: 16px;"]]{d.day}[[/th]]\n'
+            html_cal += '[[/tr]]\n'
             
             for idx, row in df_grid.iterrows():
                 f_name = row['Filial']
-                html_cal += f'<tr><td style="border: none; padding: 10px 15px; text-align: right; font-weight: bold; color: #555;">{f_name}</td>\n'
+                html_cal += f'[[tr]][[td style="border: none; padding: 10px 15px; text-align: right; font-weight: bold; color: #555;"]]{f_name}[[/td]]\n'
                 for d in dates:
                     d_label = d.strftime('%d/%m')
                     status = row[d_label]
@@ -749,33 +809,44 @@ with aba3:
                         cor_bg, cor_texto = '#f4b084', '#333'
                     else:
                         cor_bg, cor_texto = '#ffffff', '#999'
-                    html_cal += f'<td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;">contagem</td>\n'
-                    html_cal += f'<td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;">recontagem</td>\n'
-                html_cal += '</tr>\n'
+                    html_cal += f'[[td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;"]]contagem[[/td]]\n'
+                    html_cal += f'[[td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;"]]recontagem[[/td]]\n'
+                html_cal += '[[/tr]]\n'
                 
-            html_cal += '</table><br>\n'
-            html_cal += '<table style="border-collapse: collapse; text-align: center; font-family: Arial, sans-serif; font-size: 12px; font-weight: bold;">\n'
-            html_cal += '<tr><td style="border: 1px solid #000; padding: 3px 20px;">LEGENDA</td></tr>\n'
-            html_cal += '<tr><td style="border: 1px solid #000; padding: 3px 20px; background-color: #f4b084;">NÃO INVENTARIADO</td></tr>\n'
-            html_cal += '<tr><td style="border: 1px solid #000; padding: 3px 20px; background-color: #a9d08e;">INVENTARIADO - OK</td></tr>\n'
-            html_cal += '</table>\n'
-            html_cal += '<p>Atenciosamente.</p>\n'
-            html_cal += '</div>\n'
+            html_cal += '[[/table]][[br]]\n'
+            html_cal += '[[table style="border-collapse: collapse; text-align: center; font-family: Arial, sans-serif; font-size: 12px; font-weight: bold;"]]\n'
+            html_cal += '[[tr]][[td style="border: 1px solid #000; padding: 3px 20px;"]]LEGENDA[[/td]][[/tr]]\n'
+            html_cal += '[[tr]][[td style="border: 1px solid #000; padding: 3px 20px; background-color: #f4b084;"]]NÃO INVENTARIADO[[/td]][[/tr]]\n'
+            html_cal += '[[tr]][[td style="border: 1px solid #000; padding: 3px 20px; background-color: #a9d08e;"]]INVENTARIADO - OK[[/td]][[/tr]]\n'
+            html_cal += '[[/table]]\n'
+            html_cal += '[[p]]Atenciosamente.[[/p]]\n'
+            html_cal += '[[/div]]\n'
             
-            st.markdown(html_cal, unsafe_allow_html=True)
+            html_cal = html_cal.replace("[[", "<").replace("]]", ">")
+            
+            # --- O BOTÃO SEGURO DE DOWNLOAD DO HTML ---
+            st.download_button(
+                label="📥 Baixar E-mail Gerado (Abrir no navegador para copiar)",
+                data=html_cal.encode('utf-8'),
+                file_name=f"Reporte_Semanal_{data_inicio.strftime('%d-%m-%Y')}.html",
+                mime="text/html",
+                type="primary",
+                use_container_width=True
+            )
+            
     else:
         st.info("O Histórico de Inventário está vazio. Salve algumas apurações diárias para poder gerar o reporte semanal.")
 
 # --- ABA 4: PENDENTES (TRAVADOS NO SD1) ---
 with aba4:
-    if not df_res_atual.empty:
-        st.markdown("### 🔒 Itens Bloqueados na Contagem Atual (Ainda no SD1)")
-        df_travado = df_res_atual[df_res_atual['DISPONIVEL PARA INVENTARIO?'] == 'NÃO']
+    if not df_res_pendentes_global.empty:
+        st.markdown("### 🔒 Itens Bloqueados nas Contagens em Andamento (SD1)")
+        df_travado = df_res_pendentes_global[df_res_pendentes_global['DISPONIVEL PARA INVENTARIO?'] == 'NÃO']
         
         if not df_travado.empty:
-            st.warning(f"Foram encontrados {len(df_travado)} itens na contagem atual que estão pendentes de classificação fiscal (SD1). Eles não compõem os Resultados Gerenciais.")
+            st.warning(f"Foram encontrados {len(df_travado)} itens nas contagens pendentes que estão travados na classificação fiscal (SD1). Eles não compõem os Resultados Gerenciais.")
             st.dataframe(df_travado[["FILIAL", "CODIGO INTERNO", "DESCRIÇÃO", "CUSTO UNITARIO", "CONTAGEM 1"]], use_container_width=True, hide_index=True)
         else:
-            st.success("Tudo limpo! Nenhum item da contagem atual estava retido no SD1.")
+            st.success("Tudo limpo! Nenhum item das contagens atuais está retido no SD1.")
     else:
-        st.info("Faça o upload de uma contagem na barra lateral para verificar se há itens retidos no SD1.")
+        st.info("Aguardando o processamento de uma contagem na Aba 1 para verificar travamentos no SD1.")
