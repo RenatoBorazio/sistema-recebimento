@@ -66,9 +66,9 @@ try:
         c_custo_st = obter_primeira_coluna(df_cad_raw, ['CUSTO STAND', 'CUSTO STAND.', 'ULT. PRECO', 'ULTIMO PRECO', 'PRECO VENDA'])
         
         df_cad = pd.DataFrame()
-        df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
-        df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
-        df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', ''], '').str.strip() if c_desc else ""
+        df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
+        df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
+        df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', '<NA>'], '').str.strip() if c_desc else ""
         df_cad['CUSTO STAND'] = safe_numeric(df_cad_raw[c_custo_st]) if c_custo_st else 0.0
     else:
         df_cad = pd.DataFrame()
@@ -94,9 +94,9 @@ try:
         c_custo = obter_primeira_coluna(df_est_raw, ['CUSTO UNITARIO', 'CUSTO UNITÁRIO', 'CUSTO', 'CM1', 'B2_CM1', 'CUSTO MEDIO', 'CUSTO MÉDIO', 'VALOR UNITARIO', 'VALOR UNITÁRIO'])
         
         df_est = pd.DataFrame()
-        df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
-        df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
-        df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
+        df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
+        df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
+        df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
         df_est['Saldo Inicial'] = safe_numeric(df_est_raw[c_saldo]) if c_saldo else 0.0
         df_est['Custo Unitario'] = safe_numeric(df_est_raw[c_custo]) if c_custo else 0.0
     else:
@@ -112,8 +112,8 @@ try:
         c_prod_sd1 = obter_primeira_coluna(df_sd1_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'D1_COD'])
         
         df_sd1 = pd.DataFrame()
-        df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
-        df_sd1['Produto'] = df_sd1_raw[c_prod_sd1].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod_sd1 else ""
+        df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
+        df_sd1['Produto'] = df_sd1_raw[c_prod_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod_sd1 else ""
     else:
         df_sd1 = pd.DataFrame()
 except:
@@ -219,7 +219,7 @@ def processar_contagem(df_contagem):
             
         val_c2 = row.get('CONTAGEM 2')
         is_recontado = False
-        if pd.notna(val_c2) and str(val_c2).strip() not in ['', 'nan', 'None', '']:
+        if pd.notna(val_c2) and str(val_c2).strip() not in ['', 'nan', 'None', '<NA>']:
             val_c2_str = str(val_c2)
             if ',' in val_c2_str: val_c2_str = val_c2_str.replace('.', '').replace(',', '.')
             contagem_2 = pd.to_numeric(val_c2_str, errors='coerce')
@@ -241,7 +241,8 @@ def processar_contagem(df_contagem):
             if 'DESCRIÇÃO SB1' in df_cad.columns:
                 descricao = str(m_cad['DESCRIÇÃO SB1'].iloc[0])
         else:
-            if not df_barras.empty:
+            # BLINDAGEM CONTRA KEYERROR ('EAN' ou 'CODIGO INTERNO' faltando)
+            if not df_barras.empty and 'EAN' in df_barras.columns and 'CODIGO INTERNO' in df_barras.columns:
                 m_barra = df_barras[df_barras['EAN'].astype(str) == codigo_informado]
                 if not m_barra.empty:
                     cod_interno = str(m_barra['CODIGO INTERNO'].iloc[0])
@@ -268,13 +269,16 @@ def processar_contagem(df_contagem):
                     curva_abc = curva_val
             
         disponivel = "SIM"
-        if not df_sd1.empty:
+        if not df_sd1.empty and 'Filial' in df_sd1.columns and 'Produto' in df_sd1.columns:
             match_sd1 = df_sd1[(df_sd1['Filial'].astype(str) == filial) & (df_sd1['Produto'].astype(str) == cod_interno)]
             if not match_sd1.empty: disponivel = "NÃO"
                 
         saldo_inicial = 0.0
         custo_unitario = 0.0
-        match_est = df_est[(df_est['Filial'].astype(str) == filial) & (df_est['Produto'].astype(str) == cod_interno)]
+        match_est = pd.DataFrame()
+        
+        if not df_est.empty and 'Filial' in df_est.columns and 'Produto' in df_est.columns:
+            match_est = df_est[(df_est['Filial'].astype(str) == filial) & (df_est['Produto'].astype(str) == cod_interno)]
         
         if not match_est.empty:
             col_arm_est = 'Armazem' if 'Armazem' in df_est.columns else ('ARMAZEM' if 'ARMAZEM' in df_est.columns else None)
@@ -471,7 +475,6 @@ with aba1:
                         df_salvar['DATA'] = str(dt_input)
                         df_salvar.insert(0, 'PERIODO', str(per_input))
                         
-                        # Limpa histórico antigo se a pessoa estiver sobrepondo
                         if not df_hist.empty:
                             df_hist = df_hist[~((df_hist['PERIODO'].astype(str) == str(per_input)) & 
                                                 (df_hist['DATA'].astype(str) == str(dt_input)) & 
@@ -480,7 +483,6 @@ with aba1:
                         df_hist_novo = pd.concat([df_hist, df_salvar], ignore_index=True)
                         salvar_historico_nuvem(df_hist_novo)
                         
-                        # Remove a contagem dos pendentes
                         df_pend_new = df_pendentes[df_pendentes['Filial'] != filial]
                         salvar_pendentes_nuvem(df_pend_new)
                         
@@ -551,7 +553,7 @@ with aba2:
                             "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                            "DIV. VALOR R\(": f"R\) {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
                         
@@ -575,7 +577,7 @@ with aba2:
                             "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                            "DIV. VALOR R\(": f"R\) {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
                         
