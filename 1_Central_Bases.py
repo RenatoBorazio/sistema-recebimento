@@ -16,7 +16,7 @@ bases_esperadas = {
     "Estoque Inicial": "estoque_inicial",
     "Notas Pendentes (SD1)": "sd1_pendente",
     "Códigos de Barras Adicionais": "barras_adicionais",
-    "Curva ABC": "base_curva_abc"
+    "Curva ABC": "base_curva_abc",
     "Saídas / Vendas (SD2)": "sd2_saidas"
 }
 
