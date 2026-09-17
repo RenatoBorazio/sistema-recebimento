@@ -70,7 +70,7 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                     
                     # --- O RAIO-X DE CABEÇALHOS DO PROTHEUS ---
                     # Identifica se o Pandas leu a linha de metadados do Protheus (ex: SC7 ou Unnamed)
-                    precisa_ajustar = any(str(c).lower().startswith('unnamed') or str(c).lower().startswith('sem nome') or str(c).upper() in ['SC7', 'SB1', 'SB2', 'SD1'] for c in df.columns)
+                    precisa_ajustar = any(str(c).lower().startswith('unnamed') or str(c).lower().startswith('sem nome') or str(c).upper() in ['SC7', 'SB1', 'SB2', 'SD1', 'SD2'] for c in df.columns)
                     
                     if precisa_ajustar:
                         # Varre as primeiras 15 linhas buscando onde estão os títulos reais
