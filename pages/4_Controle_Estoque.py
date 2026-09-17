@@ -42,13 +42,13 @@ def carregar_dados():
     except Exception as e: 
         df_cad = pd.DataFrame()
 
-    # 2. Carregar Estoque Atual
+    # 2. Carregar Estoque Atual (Mapeamento Expandido)
     try:
         df_est_raw = conn.query("SELECT * FROM estoque_inicial", ttl=0).astype(str)
         df_est_raw.columns = [str(c).upper().strip() for c in df_est_raw.columns]
-        c_filial = obter_primeira_coluna(df_est_raw, ['FILIAL', 'B2_FILIAL', 'B7_FILIAL'])
-        c_prod = obter_primeira_coluna(df_est_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO'])
-        c_saldo = obter_primeira_coluna(df_est_raw, ['SALDO INICIAL', 'SALDO', 'QUANTIDADE', 'B2_QATU'])
+        c_filial = obter_primeira_coluna(df_est_raw, ['FILIAL', 'B2_FILIAL', 'B7_FILIAL', 'COD FILIAL', 'CÓDIGO FILIAL'])
+        c_prod = obter_primeira_coluna(df_est_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'B2_COD', 'B7_COD', 'ITEM', 'COD. PRODUTO'])
+        c_saldo = obter_primeira_coluna(df_est_raw, ['SALDO INICIAL', 'SALDO', 'QTD INICIAL', 'QUANTIDADE', 'B2_QATU', 'B7_QUANT', 'QTD', 'SALDO ATUAL', 'ESTOQUE'])
         
         df_est = pd.DataFrame()
         if c_prod and c_saldo:
@@ -56,17 +56,15 @@ def carregar_dados():
             df_est['CODIGO'] = df_est_raw[c_prod].astype(str).replace(r'\.0$', '', regex=True).str.strip()
             df_est['SALDO'] = safe_numeric(df_est_raw[c_saldo])
             
-            # Agrupar saldo por filial e produto (caso haja múltiplos armazéns)
             df_est = df_est.groupby(['FILIAL', 'CODIGO'])['SALDO'].sum().reset_index()
         else:
-            erros_log.append("Estoque: As colunas Produto e Saldo não foram encontradas.")
+            erros_log.append("Estoque: As colunas Produto e Saldo não foram encontradas (Títulos mapeados: PRODUTO, CODIGO, B2_COD, SALDO, B2_QATU, QUANTIDADE, etc).")
     except Exception as e:
         df_est = pd.DataFrame()
         erros_log.append(f"Falha ao conectar no Estoque Inicial: {str(e)}")
 
-    # 3. Carregar SD2 OTIMIZADO (Prevenção de quebra de memória para 60MB)
+    # 3. Carregar SD2 OTIMIZADO
     try:
-        # Lê apenas 1 linha para mapear as colunas exatas que estão no banco
         df_cols = conn.query("SELECT * FROM sd2_saidas LIMIT 1", ttl=0)
         colunas_reais = df_cols.columns.tolist()
         colunas_upper = [str(c).upper().strip() for c in colunas_reais]
@@ -74,17 +72,16 @@ def carregar_dados():
         def acha_nome_real(nomes_possiveis):
             for i, c_up in enumerate(colunas_upper):
                 if c_up in nomes_possiveis:
-                    return f'"{colunas_reais[i]}"' # Coloca entre aspas para o PostgreSQL não quebrar com espaços/pontos
+                    return f'"{colunas_reais[i]}"' 
             return None
 
         c_filial_sql = acha_nome_real(['FILIAL', 'D2_FILIAL'])
-        c_prod_sql = acha_nome_real(['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO'])
+        c_prod_sql = acha_nome_real(['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO'])
         c_qtd_sql = acha_nome_real(['QUANTIDADE', 'QTD', 'D2_QUANT'])
         c_emissao_sql = acha_nome_real(['EMISSAO', 'EMISSÃO', 'DATA', 'D2_EMISSAO'])
 
         df_sd2 = pd.DataFrame()
         if c_prod_sql and c_emissao_sql:
-            # Monta a query para baixar apenas as colunas leves
             cols_to_fetch = [c for c in [c_filial_sql, c_prod_sql, c_qtd_sql, c_emissao_sql] if c]
             query_str = f"SELECT {', '.join(cols_to_fetch)} FROM sd2_saidas"
             
@@ -92,15 +89,14 @@ def carregar_dados():
             df_sd2_raw.columns = [str(c).upper().strip() for c in df_sd2_raw.columns]
             
             c_f = obter_primeira_coluna(df_sd2_raw, ['FILIAL', 'D2_FILIAL'])
-            c_p = obter_primeira_coluna(df_sd2_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO'])
+            c_p = obter_primeira_coluna(df_sd2_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO'])
             c_q = obter_primeira_coluna(df_sd2_raw, ['QUANTIDADE', 'QTD', 'D2_QUANT'])
             c_e = obter_primeira_coluna(df_sd2_raw, ['EMISSAO', 'EMISSÃO', 'DATA', 'D2_EMISSAO'])
 
             df_sd2['FILIAL'] = df_sd2_raw[c_f].replace(r'\.0$', '', regex=True).str.strip() if c_f else ""
             df_sd2['CODIGO'] = df_sd2_raw[c_p].replace(r'\.0$', '', regex=True).str.strip()
             
-            # --- MOTOR DE TRADUÇÃO DE DATAS ---
-            datas_limpas = df_sd2_raw[c_e].str.split(' ').str[0] # Limpa as horas se vier do Excel
+            datas_limpas = df_sd2_raw[c_e].str.split(' ').str[0] 
             datas_convertidas = pd.to_datetime(datas_limpas, format='%d/%m/%Y', errors='coerce')
             datas_convertidas = datas_convertidas.fillna(pd.to_datetime(datas_limpas, format='%Y-%m-%d', errors='coerce'))
             
