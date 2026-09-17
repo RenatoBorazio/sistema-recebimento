@@ -26,21 +26,42 @@ def obter_primeira_coluna(df, nomes_possiveis):
 def carregar_dados():
     erros_log = []
     
-    # 1. Carregar SB1 (Cadastro e Preço de Venda)
+    # 1. Carregar SB1 (Cadastro e Preço de Venda) - OTIMIZADO
     try:
-        df_cad_raw = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
-        df_cad_raw.columns = [str(c).upper().strip() for c in df_cad_raw.columns]
-        c_int = obter_primeira_coluna(df_cad_raw, ['CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO'])
-        c_desc = obter_primeira_coluna(df_cad_raw, ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME'])
-        c_preco = obter_primeira_coluna(df_cad_raw, ['PRECO VENDA', 'PREÇO VENDA', 'ULTIMO PRECO', 'ULT. PRECO'])
+        df_cols_cad = conn.query("SELECT * FROM cadastro_produtos LIMIT 1", ttl=0)
+        colunas_reais_cad = df_cols_cad.columns.tolist()
+        colunas_upper_cad = [str(c).upper().strip() for c in colunas_reais_cad]
         
+        def acha_nome_real_cad(nomes_possiveis):
+            for i, c_up in enumerate(colunas_upper_cad):
+                if c_up in nomes_possiveis:
+                    return f'"{colunas_reais_cad[i]}"' 
+            return None
+
+        c_int_sql = acha_nome_real_cad(['CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'B1_COD'])
+        c_desc_sql = acha_nome_real_cad(['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME', 'B1_DESC'])
+        c_preco_sql = acha_nome_real_cad(['PRECO VENDA', 'PREÇO VENDA', 'ULTIMO PRECO', 'ULT. PRECO', 'CUSTO STAND', 'CUSTO STAND.', 'PRC TABELA', 'CUSTO'])
+
         df_cad = pd.DataFrame()
-        if c_int:
-            df_cad['CODIGO'] = df_cad_raw[c_int].astype(str).replace(r'\.0$', '', regex=True).str.strip()
-            df_cad['DESCRIÇÃO'] = df_cad_raw[c_desc].astype(str).strip() if c_desc else ""
-            df_cad['PRECO_VENDA'] = safe_numeric(df_cad_raw[c_preco]) if c_preco else 0.0
+        if c_int_sql:
+            cols_to_fetch_cad = [c for c in [c_int_sql, c_desc_sql, c_preco_sql] if c]
+            query_cad = f"SELECT {', '.join(cols_to_fetch_cad)} FROM cadastro_produtos"
+            
+            df_cad_raw = conn.query(query_cad, ttl=0).astype(str)
+            df_cad_raw.columns = [str(c).upper().strip() for c in df_cad_raw.columns]
+            
+            c_i = obter_primeira_coluna(df_cad_raw, ['CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'PRODUTO', 'B1_COD'])
+            c_d = obter_primeira_coluna(df_cad_raw, ['DESCRIÇÃO SB1', 'DESCRICAO SB1', 'DESCRICAO', 'DESCRIÇÃO', 'NOME', 'B1_DESC'])
+            c_p = obter_primeira_coluna(df_cad_raw, ['PRECO VENDA', 'PREÇO VENDA', 'ULTIMO PRECO', 'ULT. PRECO', 'CUSTO STAND', 'CUSTO STAND.', 'PRC TABELA', 'CUSTO'])
+
+            df_cad['CODIGO'] = df_cad_raw[c_i].replace(r'\.0$', '', regex=True).str.strip()
+            df_cad['DESCRIÇÃO'] = df_cad_raw[c_d].astype(str).str.strip() if c_d else "S/D"
+            df_cad['PRECO_VENDA'] = safe_numeric(df_cad_raw[c_p]) if c_p else 0.0
+        else:
+            erros_log.append("SB1: Coluna de código/produto não encontrada.")
     except Exception as e: 
         df_cad = pd.DataFrame()
+        erros_log.append(f"Falha ao conectar no SB1: {str(e)}")
 
     # 2. Carregar Estoque Atual (Mapeamento Expandido)
     try:
@@ -58,7 +79,7 @@ def carregar_dados():
             
             df_est = df_est.groupby(['FILIAL', 'CODIGO'])['SALDO'].sum().reset_index()
         else:
-            erros_log.append("Estoque: As colunas Produto e Saldo não foram encontradas (Títulos mapeados: PRODUTO, CODIGO, B2_COD, SALDO, B2_QATU, QUANTIDADE, etc).")
+            erros_log.append("Estoque: As colunas Produto e Saldo não foram encontradas.")
     except Exception as e:
         df_est = pd.DataFrame()
         erros_log.append(f"Falha ao conectar no Estoque Inicial: {str(e)}")
@@ -177,14 +198,17 @@ df_master['TOTAL_VENDIDO'] = df_master['TOTAL_VENDIDO'].fillna(0)
 df_master['VENDA_DIA'] = df_master['VENDA_DIA'].fillna(0)
 df_master['ULTIMA_VENDA'] = df_master['ULTIMA_VENDA'].fillna(pd.NaT)
 
+# Trazer Descrição e Preço de Venda do Cadastro (SB1)
 if not df_cad.empty:
     df_cad_unique = df_cad.drop_duplicates(subset=['CODIGO'])
     df_master = pd.merge(df_master, df_cad_unique[['CODIGO', 'DESCRIÇÃO', 'PRECO_VENDA']], on='CODIGO', how='left')
-    df_master['PRECO_VENDA'] = df_master['PRECO_VENDA'].fillna(0)
+    df_master['DESCRIÇÃO'] = df_master['DESCRIÇÃO'].fillna("S/D")
+    df_master['PRECO_VENDA'] = df_master['PRECO_VENDA'].fillna(0.0)
 else:
     df_master['DESCRIÇÃO'] = "S/D"
     df_master['PRECO_VENDA'] = 0.0
 
+# Trazer Curva ABC
 df_master['CURVA'] = "C"
 if not df_curva.empty:
     if 'FILIAL' in df_curva.columns and not df_curva['FILIAL'].eq("").all():
@@ -218,7 +242,10 @@ def calcular_perda(row):
     elif row['SALDO'] > 0 and row['VENDA_DIA'] > 0 and row['DIAS_COBERTURA'] <= cobertura_alvo:
         return pd.Series([0, 0.0, 0.0, "Risco"])
         
-    return pd.Series([0, 0.0, 0.0, "OK"])
+    elif row['SALDO'] > 0 and row['VENDA_DIA'] == 0:
+        return pd.Series([0, 0.0, 0.0, "Sem Giro"])
+        
+    return pd.Series([0, 0.0, 0.0, "Saudável"])
 
 df_master[['DIAS_ZERADO', 'PERDA_DIARIA_RS', 'PERDA_ACUMULADA_RS', 'STATUS']] = df_master.apply(calcular_perda, axis=1)
 
@@ -249,7 +276,12 @@ cols_view = [
     'DIAS_COBERTURA', 'ULTIMA_VENDA', 'DIAS_ZERADO', 'PERDA_DIARIA_RS', 'PERDA_ACUMULADA_RS'
 ]
 
-aba_ruptura, aba_risco, aba_saudavel = st.tabs(["🚨 Ruptura Atual (Perdendo Dinheiro)", "⚠️ Risco de Ruptura Futura", "✅ Estoque Saudável / Sem Giro"])
+aba_ruptura, aba_risco, aba_saudavel, aba_sem_giro = st.tabs([
+    "🚨 Ruptura Atual (Perdendo Dinheiro)", 
+    "⚠️ Risco de Ruptura Futura", 
+    "✅ Estoque Saudável", 
+    "💤 Sem Giro no Período"
+])
 
 with aba_ruptura:
     st.markdown("#### Produtos Zerados com Giro Confirmado")
@@ -277,14 +309,28 @@ with aba_risco:
     st.dataframe(df_view_risco, use_container_width=True, hide_index=True)
 
 with aba_saudavel:
-    st.markdown("#### Produtos Saudáveis ou Sem Saída")
-    df_ok = df_master[df_master['STATUS'] == 'OK'].copy()
-    df_view_ok = df_ok.sort_values(by='DIAS_COBERTURA', ascending=False)[['FILIAL', 'CODIGO', 'DESCRIÇÃO', 'CURVA', 'SALDO', 'VENDA_DIA', 'DIAS_COBERTURA']].copy()
+    st.markdown("#### Produtos Saudáveis (Com Giro e Cobertura Segura)")
+    st.write("Estes itens registraram vendas no período e possuem saldo suficiente para cobrir os dias alvo de segurança.")
     
-    df_view_ok['VENDA_DIA'] = df_view_ok['VENDA_DIA'].apply(lambda x: f"{x:.2f} un/dia" if x > 0 else "0.00")
-    df_view_ok['DIAS_COBERTURA'] = df_view_ok.apply(lambda r: f"{r['DIAS_COBERTURA']:.0f} dias" if r['VENDA_DIA'] != "0.00" else "Sem Giro (999+)", axis=1)
+    df_ok = df_master[df_master['STATUS'] == 'Saudável'].copy()
+    df_view_ok = df_ok.sort_values(by='DIAS_COBERTURA', ascending=True)[['FILIAL', 'CODIGO', 'DESCRIÇÃO', 'CURVA', 'SALDO', 'VENDA_DIA', 'DIAS_COBERTURA']].copy()
+    
+    df_view_ok['VENDA_DIA'] = df_view_ok['VENDA_DIA'].apply(lambda x: f"{x:.2f} un/dia")
+    df_view_ok['DIAS_COBERTURA'] = df_view_ok['DIAS_COBERTURA'].apply(lambda r: f"{r:.0f} dias")
     
     st.dataframe(df_view_ok, use_container_width=True, hide_index=True)
+
+with aba_sem_giro:
+    st.markdown("#### Produtos Sem Saída")
+    st.write(f"Estes itens possuem saldo em estoque, mas não registraram nenhuma venda nos últimos **{dias_analise} dias** analisados.")
+    
+    df_sg = df_master[df_master['STATUS'] == 'Sem Giro'].copy()
+    df_view_sg = df_sg.sort_values(by='SALDO', ascending=False)[['FILIAL', 'CODIGO', 'DESCRIÇÃO', 'CURVA', 'SALDO', 'VENDA_DIA', 'DIAS_COBERTURA']].copy()
+    
+    df_view_sg['VENDA_DIA'] = "0.00 un/dia"
+    df_view_sg['DIAS_COBERTURA'] = "Sem Giro (999+)"
+    
+    st.dataframe(df_view_sg, use_container_width=True, hide_index=True)
 
 st.divider()
 st.markdown("### 📥 Exportar Análise Completa")
