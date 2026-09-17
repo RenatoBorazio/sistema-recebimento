@@ -70,7 +70,15 @@ def carregar_dados():
         if c_prod_sd2 and c_emissao:
             df_sd2['FILIAL'] = df_sd2_raw[c_filial_sd2].astype(str).replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd2 else ""
             df_sd2['CODIGO'] = df_sd2_raw[c_prod_sd2].astype(str).replace(r'\.0$', '', regex=True).str.strip()
-            df_sd2['DATA_VENDA'] = pd.to_datetime(df_sd2_raw[c_emissao], format='%d/%m/%Y', errors='coerce')
+            
+            # --- MOTOR DE TRADUÇÃO DE DATAS (CSV vs EXCEL) ---
+            datas_limpas = df_sd2_raw[c_emissao].astype(str).str.split(' ').str[0] # Remove horas do Excel se tiver
+            # Tenta formato BR (CSV do Protheus)
+            datas_convertidas = pd.to_datetime(datas_limpas, format='%d/%m/%Y', errors='coerce')
+            # Preenche o que falhou com formato ISO (Excel de histórico)
+            datas_convertidas = datas_convertidas.fillna(pd.to_datetime(datas_limpas, format='%Y-%m-%d', errors='coerce'))
+            
+            df_sd2['DATA_VENDA'] = datas_convertidas
             df_sd2['QTD_VENDIDA'] = safe_numeric(df_sd2_raw[c_qtd_sd2]) if c_qtd_sd2 else 1.0
     except: df_sd2 = pd.DataFrame()
 
