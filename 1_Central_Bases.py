@@ -21,11 +21,12 @@ bases_esperadas = {
 }
 
 def detectar_separador(arquivo_enviado, encoding):
-    """Detecta se o arquivo usa ';' ou ',' olhando a primeira linha."""
+    """Detecta se o arquivo usa ';' ou ',' olhando as primeiras linhas."""
     arquivo_enviado.seek(0)
-    primeira_linha = arquivo_enviado.readline().decode(encoding, errors='ignore')
+    # Lendo as primeiras 5 linhas para não ser enganado por palavras soltas do Protheus na linha 1
+    amostra = "".join([arquivo_enviado.readline().decode(encoding, errors='ignore') for _ in range(5)])
     arquivo_enviado.seek(0)
-    return ';' if primeira_linha.count(';') >= primeira_linha.count(',') else ','
+    return ';' if amostra.count(';') >= amostra.count(',') else ','
 
 def deduplicar_colunas(colunas):
     """Renomeia colunas repetidas para evitar erro no banco."""
