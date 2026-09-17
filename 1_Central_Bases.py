@@ -17,6 +17,7 @@ bases_esperadas = {
     "Notas Pendentes (SD1)": "sd1_pendente",
     "Códigos de Barras Adicionais": "barras_adicionais",
     "Curva ABC": "base_curva_abc"
+    "Saídas / Vendas (SD2)": "sd2_saidas"
 }
 
 def detectar_separador(arquivo_enviado, encoding):
