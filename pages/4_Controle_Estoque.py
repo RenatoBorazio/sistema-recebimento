@@ -24,6 +24,8 @@ def obter_primeira_coluna(df, nomes_possiveis):
 
 @st.cache_data(ttl=300)
 def carregar_dados():
+    erros_log = []
+    
     # 1. Carregar SB1 (Cadastro e Preço de Venda)
     try:
         df_cad_raw = conn.query("SELECT * FROM cadastro_produtos", ttl=0).astype(str)
@@ -37,7 +39,8 @@ def carregar_dados():
             df_cad['CODIGO'] = df_cad_raw[c_int].astype(str).replace(r'\.0$', '', regex=True).str.strip()
             df_cad['DESCRIÇÃO'] = df_cad_raw[c_desc].astype(str).strip() if c_desc else ""
             df_cad['PRECO_VENDA'] = safe_numeric(df_cad_raw[c_preco]) if c_preco else 0.0
-    except: df_cad = pd.DataFrame()
+    except Exception as e: 
+        df_cad = pd.DataFrame()
 
     # 2. Carregar Estoque Atual
     try:
@@ -55,32 +58,59 @@ def carregar_dados():
             
             # Agrupar saldo por filial e produto (caso haja múltiplos armazéns)
             df_est = df_est.groupby(['FILIAL', 'CODIGO'])['SALDO'].sum().reset_index()
-    except: df_est = pd.DataFrame()
+        else:
+            erros_log.append("Estoque: As colunas Produto e Saldo não foram encontradas.")
+    except Exception as e:
+        df_est = pd.DataFrame()
+        erros_log.append(f"Falha ao conectar no Estoque Inicial: {str(e)}")
 
-    # 3. Carregar SD2 (Saídas/Vendas)
+    # 3. Carregar SD2 OTIMIZADO (Prevenção de quebra de memória para 60MB)
     try:
-        df_sd2_raw = conn.query("SELECT * FROM sd2_saidas", ttl=0).astype(str)
-        df_sd2_raw.columns = [str(c).upper().strip() for c in df_sd2_raw.columns]
-        c_filial_sd2 = obter_primeira_coluna(df_sd2_raw, ['FILIAL', 'D2_FILIAL'])
-        c_prod_sd2 = obter_primeira_coluna(df_sd2_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO'])
-        c_qtd_sd2 = obter_primeira_coluna(df_sd2_raw, ['QUANTIDADE', 'QTD', 'D2_QUANT'])
-        c_emissao = obter_primeira_coluna(df_sd2_raw, ['EMISSAO', 'EMISSÃO', 'DATA', 'D2_EMISSAO'])
+        # Lê apenas 1 linha para mapear as colunas exatas que estão no banco
+        df_cols = conn.query("SELECT * FROM sd2_saidas LIMIT 1", ttl=0)
+        colunas_reais = df_cols.columns.tolist()
+        colunas_upper = [str(c).upper().strip() for c in colunas_reais]
         
+        def acha_nome_real(nomes_possiveis):
+            for i, c_up in enumerate(colunas_upper):
+                if c_up in nomes_possiveis:
+                    return f'"{colunas_reais[i]}"' # Coloca entre aspas para o PostgreSQL não quebrar com espaços/pontos
+            return None
+
+        c_filial_sql = acha_nome_real(['FILIAL', 'D2_FILIAL'])
+        c_prod_sql = acha_nome_real(['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO'])
+        c_qtd_sql = acha_nome_real(['QUANTIDADE', 'QTD', 'D2_QUANT'])
+        c_emissao_sql = acha_nome_real(['EMISSAO', 'EMISSÃO', 'DATA', 'D2_EMISSAO'])
+
         df_sd2 = pd.DataFrame()
-        if c_prod_sd2 and c_emissao:
-            df_sd2['FILIAL'] = df_sd2_raw[c_filial_sd2].astype(str).replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd2 else ""
-            df_sd2['CODIGO'] = df_sd2_raw[c_prod_sd2].astype(str).replace(r'\.0$', '', regex=True).str.strip()
+        if c_prod_sql and c_emissao_sql:
+            # Monta a query para baixar apenas as colunas leves
+            cols_to_fetch = [c for c in [c_filial_sql, c_prod_sql, c_qtd_sql, c_emissao_sql] if c]
+            query_str = f"SELECT {', '.join(cols_to_fetch)} FROM sd2_saidas"
             
-            # --- MOTOR DE TRADUÇÃO DE DATAS (CSV vs EXCEL) ---
-            datas_limpas = df_sd2_raw[c_emissao].astype(str).str.split(' ').str[0] # Remove horas do Excel se tiver
-            # Tenta formato BR (CSV do Protheus)
+            df_sd2_raw = conn.query(query_str, ttl=0).astype(str)
+            df_sd2_raw.columns = [str(c).upper().strip() for c in df_sd2_raw.columns]
+            
+            c_f = obter_primeira_coluna(df_sd2_raw, ['FILIAL', 'D2_FILIAL'])
+            c_p = obter_primeira_coluna(df_sd2_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO'])
+            c_q = obter_primeira_coluna(df_sd2_raw, ['QUANTIDADE', 'QTD', 'D2_QUANT'])
+            c_e = obter_primeira_coluna(df_sd2_raw, ['EMISSAO', 'EMISSÃO', 'DATA', 'D2_EMISSAO'])
+
+            df_sd2['FILIAL'] = df_sd2_raw[c_f].replace(r'\.0$', '', regex=True).str.strip() if c_f else ""
+            df_sd2['CODIGO'] = df_sd2_raw[c_p].replace(r'\.0$', '', regex=True).str.strip()
+            
+            # --- MOTOR DE TRADUÇÃO DE DATAS ---
+            datas_limpas = df_sd2_raw[c_e].str.split(' ').str[0] # Limpa as horas se vier do Excel
             datas_convertidas = pd.to_datetime(datas_limpas, format='%d/%m/%Y', errors='coerce')
-            # Preenche o que falhou com formato ISO (Excel de histórico)
             datas_convertidas = datas_convertidas.fillna(pd.to_datetime(datas_limpas, format='%Y-%m-%d', errors='coerce'))
             
             df_sd2['DATA_VENDA'] = datas_convertidas
-            df_sd2['QTD_VENDIDA'] = safe_numeric(df_sd2_raw[c_qtd_sd2]) if c_qtd_sd2 else 1.0
-    except: df_sd2 = pd.DataFrame()
+            df_sd2['QTD_VENDIDA'] = safe_numeric(df_sd2_raw[c_q]) if c_q else 1.0
+        else:
+            erros_log.append("SD2: As colunas de Produto ou Emissao não foram encontradas na tabela do banco.")
+    except Exception as e: 
+        df_sd2 = pd.DataFrame()
+        erros_log.append(f"Falha ao conectar no SD2: {str(e)}")
 
     # 4. Curva ABC (Opcional)
     try:
@@ -97,13 +127,29 @@ def carregar_dados():
             df_curva['FILIAL'] = df_curva_raw[c_fil_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip() if c_fil_curva else ""
     except: df_curva = pd.DataFrame()
 
-    return df_cad, df_est, df_sd2, df_curva
+    return df_cad, df_est, df_sd2, df_curva, erros_log
 
 with st.spinner("Conectando ao banco de dados e processando milhares de registros de venda..."):
-    df_cad, df_est, df_sd2, df_curva = carregar_dados()
+    df_cad, df_est, df_sd2, df_curva, erros_log = carregar_dados()
 
-if df_sd2.empty or df_est.empty:
-    st.warning("⚠️ Base Incompleta! Sincronize o Estoque Inicial e as Saídas (SD2) na Central de Bases.")
+# --- DIAGNÓSTICO DETALHADO DE ALERTAS ---
+if df_est.empty and df_sd2.empty:
+    st.error("🚨 Faltam DUAS bases no sistema: O **Estoque Inicial** e o **SD2 (Saídas)**. Por favor, suba ambos na Central de Bases.")
+    if erros_log:
+        with st.expander("🛠️ Ver Logs de Erro do Banco de Dados"):
+            for err in erros_log: st.code(err)
+    st.stop()
+elif df_est.empty:
+    st.error("🚨 Falta o **Estoque Inicial**! O sistema achou as vendas, mas não o estoque. Por favor, atualize o Estoque na Central de Bases.")
+    if erros_log:
+        with st.expander("🛠️ Ver Logs de Erro do Banco de Dados"):
+            for err in erros_log: st.code(err)
+    st.stop()
+elif df_sd2.empty:
+    st.error("🚨 Falta a base de **Saídas (SD2)**! O sistema achou o estoque, mas as vendas não foram carregadas.")
+    if erros_log:
+        with st.expander("🛠️ Ver Logs de Erro do Banco de Dados"):
+            for err in erros_log: st.code(err)
     st.stop()
 
 # --- FILTROS LATERAIS ---
@@ -118,29 +164,23 @@ with st.sidebar:
     cobertura_alvo = st.number_input("Estoque de Segurança (Dias):", min_value=1, max_value=60, value=15, help="Se o estoque cobrir menos dias que isso, será considerado Risco de Ruptura.")
 
 # --- MOTOR DE CÁLCULO DE RUPTURA E PERDA ---
-# Data de corte para análise de vendas
 hoje = pd.Timestamp(datetime.date.today())
 data_corte = hoje - pd.Timedelta(days=dias_analise)
 
-# Filtrar SD2 pelo período
 df_sd2_recente = df_sd2[df_sd2['DATA_VENDA'] >= data_corte]
 
-# Agrupar Vendas (Qtd Total e Última Data de Saída)
 df_vendas_agg = df_sd2_recente.groupby(['FILIAL', 'CODIGO']).agg(
     TOTAL_VENDIDO=('QTD_VENDIDA', 'sum'),
     ULTIMA_VENDA=('DATA_VENDA', 'max')
 ).reset_index()
 
-# Calcular Venda Dia
 df_vendas_agg['VENDA_DIA'] = df_vendas_agg['TOTAL_VENDIDO'] / dias_analise
 
-# Mesclar com Estoque
 df_master = pd.merge(df_est, df_vendas_agg, on=['FILIAL', 'CODIGO'], how='left')
 df_master['TOTAL_VENDIDO'] = df_master['TOTAL_VENDIDO'].fillna(0)
 df_master['VENDA_DIA'] = df_master['VENDA_DIA'].fillna(0)
 df_master['ULTIMA_VENDA'] = df_master['ULTIMA_VENDA'].fillna(pd.NaT)
 
-# Trazer Descrição e Preço de Venda do Cadastro (SB1)
 if not df_cad.empty:
     df_cad_unique = df_cad.drop_duplicates(subset=['CODIGO'])
     df_master = pd.merge(df_master, df_cad_unique[['CODIGO', 'DESCRIÇÃO', 'PRECO_VENDA']], on='CODIGO', how='left')
@@ -149,29 +189,25 @@ else:
     df_master['DESCRIÇÃO'] = "S/D"
     df_master['PRECO_VENDA'] = 0.0
 
-# Trazer Curva ABC
-df_master['CURVA'] = "C" # Padrão
+df_master['CURVA'] = "C"
 if not df_curva.empty:
     if 'FILIAL' in df_curva.columns and not df_curva['FILIAL'].eq("").all():
         df_master = pd.merge(df_master, df_curva[['FILIAL', 'CODIGO', 'CURVA']], on=['FILIAL', 'CODIGO'], how='left')
     else:
         df_master = pd.merge(df_master, df_curva[['CODIGO', 'CURVA']], on='CODIGO', how='left')
     
-    # Preencher quem ficou sem match com C
     if 'CURVA_y' in df_master.columns:
         df_master['CURVA'] = df_master['CURVA_y'].fillna("C")
         df_master = df_master.drop(columns=['CURVA_x', 'CURVA_y'])
     elif 'CURVA' in df_master.columns:
         df_master['CURVA'] = df_master['CURVA'].fillna("C")
 
-# --- LÓGICA CORE: COBERTURA, DIAS ZERADO E PERDA FINANCEIRA ---
-# Dias de Cobertura (Se tem estoque e vende)
+# --- LÓGICA CORE ---
 df_master['DIAS_COBERTURA'] = df_master.apply(
     lambda r: (r['SALDO'] / r['VENDA_DIA']) if (r['VENDA_DIA'] > 0 and r['SALDO'] > 0) else (999 if r['SALDO'] > 0 else 0), axis=1
 )
 
 def calcular_perda(row):
-    # Se o item tem venda média > 0 e o estoque é ZERO
     if row['SALDO'] <= 0 and row['VENDA_DIA'] > 0:
         dias_zerado = 0
         if pd.notna(row['ULTIMA_VENDA']):
@@ -183,7 +219,6 @@ def calcular_perda(row):
         
         return pd.Series([dias_zerado, perda_diaria_rs, perda_acumulada_rs, "Ruptura"])
         
-    # Se tem estoque, mas cobre menos que a segurança
     elif row['SALDO'] > 0 and row['VENDA_DIA'] > 0 and row['DIAS_COBERTURA'] <= cobertura_alvo:
         return pd.Series([0, 0.0, 0.0, "Risco"])
         
@@ -191,7 +226,6 @@ def calcular_perda(row):
 
 df_master[['DIAS_ZERADO', 'PERDA_DIARIA_RS', 'PERDA_ACUMULADA_RS', 'STATUS']] = df_master.apply(calcular_perda, axis=1)
 
-# Aplicar Filtro de Filial
 if filiais_selecionadas:
     df_master = df_master[df_master['FILIAL'].isin(filiais_selecionadas)]
 
@@ -214,7 +248,6 @@ col4.metric(f"Risco (Cobre < {cobertura_alvo} dias)", f"{skus_risco} itens", del
 
 st.divider()
 
-# --- PREPARANDO AS TABELAS ---
 cols_view = [
     'FILIAL', 'CODIGO', 'DESCRIÇÃO', 'CURVA', 'SALDO', 'VENDA_DIA', 
     'DIAS_COBERTURA', 'ULTIMA_VENDA', 'DIAS_ZERADO', 'PERDA_DIARIA_RS', 'PERDA_ACUMULADA_RS'
@@ -261,7 +294,6 @@ st.divider()
 st.markdown("### 📥 Exportar Análise Completa")
 output = io.BytesIO()
 with pd.ExcelWriter(output, engine='openpyxl') as writer:
-    # Remove timezone issues for Excel
     df_excel = df_master.copy()
     df_excel['ULTIMA_VENDA'] = df_excel['ULTIMA_VENDA'].dt.tz_localize(None)
     df_excel.to_excel(writer, sheet_name="Projecao_Estoque", index=False)
