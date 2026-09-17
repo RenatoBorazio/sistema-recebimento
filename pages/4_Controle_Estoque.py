@@ -26,7 +26,7 @@ def obter_primeira_coluna(df, nomes_possiveis):
 def carregar_dados():
     erros_log = []
     
-    # 1. Carregar SB1 (Cadastro e Preço de Venda) - OTIMIZADO
+    # 1. Carregar SB1 (Cadastro e Preço de Venda)
     try:
         df_cols_cad = conn.query("SELECT * FROM cadastro_produtos LIMIT 1", ttl=0)
         colunas_reais_cad = df_cols_cad.columns.tolist()
@@ -63,7 +63,7 @@ def carregar_dados():
         df_cad = pd.DataFrame()
         erros_log.append(f"Falha ao conectar no SB1: {str(e)}")
 
-    # 2. Carregar Estoque Atual (Mapeamento Expandido)
+    # 2. Carregar Estoque Atual
     try:
         df_est_raw = conn.query("SELECT * FROM estoque_inicial", ttl=0).astype(str)
         df_est_raw.columns = [str(c).upper().strip() for c in df_est_raw.columns]
@@ -84,7 +84,7 @@ def carregar_dados():
         df_est = pd.DataFrame()
         erros_log.append(f"Falha ao conectar no Estoque Inicial: {str(e)}")
 
-    # 3. Carregar SD2 OTIMIZADO
+    # 3. Carregar SD2
     try:
         df_cols = conn.query("SELECT * FROM sd2_saidas LIMIT 1", ttl=0)
         colunas_reais = df_cols.columns.tolist()
@@ -124,12 +124,12 @@ def carregar_dados():
             df_sd2['DATA_VENDA'] = datas_convertidas
             df_sd2['QTD_VENDIDA'] = safe_numeric(df_sd2_raw[c_q]) if c_q else 1.0
         else:
-            erros_log.append("SD2: As colunas de Produto ou Emissao não foram encontradas na tabela do banco.")
+            erros_log.append("SD2: As colunas de Produto ou Emissao não foram encontradas.")
     except Exception as e: 
         df_sd2 = pd.DataFrame()
         erros_log.append(f"Falha ao conectar no SD2: {str(e)}")
 
-    # 4. Curva ABC (Opcional)
+    # 4. Curva ABC
     try:
         df_curva_raw = conn.query("SELECT * FROM base_curva_abc", ttl=0).astype(str)
         df_curva_raw.columns = [str(c).upper().strip() for c in df_curva_raw.columns]
@@ -146,41 +146,28 @@ def carregar_dados():
 
     return df_cad, df_est, df_sd2, df_curva, erros_log
 
-with st.spinner("Conectando ao banco de dados e processando milhares de registros de venda..."):
+with st.spinner("Conectando ao banco de dados e processando as regras de estoque..."):
     df_cad, df_est, df_sd2, df_curva, erros_log = carregar_dados()
 
-# --- DIAGNÓSTICO DETALHADO DE ALERTAS ---
-if df_est.empty and df_sd2.empty:
-    st.error("🚨 Faltam DUAS bases no sistema: O **Estoque Inicial** e o **SD2 (Saídas)**. Por favor, suba ambos na Central de Bases.")
-    if erros_log:
-        with st.expander("🛠️ Ver Logs de Erro do Banco de Dados"):
-            for err in erros_log: st.code(err)
-    st.stop()
-elif df_est.empty:
-    st.error("🚨 Falta o **Estoque Inicial**! O sistema achou as vendas, mas não o estoque. Por favor, atualize o Estoque na Central de Bases.")
-    if erros_log:
-        with st.expander("🛠️ Ver Logs de Erro do Banco de Dados"):
-            for err in erros_log: st.code(err)
-    st.stop()
-elif df_sd2.empty:
-    st.error("🚨 Falta a base de **Saídas (SD2)**! O sistema achou o estoque, mas as vendas não foram carregadas.")
-    if erros_log:
-        with st.expander("🛠️ Ver Logs de Erro do Banco de Dados"):
-            for err in erros_log: st.code(err)
+if df_est.empty or df_sd2.empty:
+    st.error("🚨 Base Incompleta! Sincronize o Estoque e as Saídas (SD2) na Central de Bases.")
     st.stop()
 
 # --- FILTROS LATERAIS ---
 with st.sidebar:
     st.header("⚙️ Configurações de Cálculo")
-    st.write("Ajuste a janela de tempo para definir a Venda Média Diária.")
     dias_analise = st.slider("Considerar vendas dos últimos X dias:", min_value=15, max_value=365, value=90, step=15)
     
+    st.markdown("---")
+    st.markdown("**Regras de Ruptura**")
+    cobertura_alvo = st.number_input("Estoque de Segurança (Dias):", min_value=1, max_value=60, value=15, help="Risco de Ruptura se a cobertura for menor que este valor.")
+    dias_ruptura = st.number_input("Dias sem venda para Ruptura:", min_value=1, max_value=30, value=3, help="Se o saldo for <= 0, só será classificado como Ruptura se estiver sem vender há pelo menos X dias (ignora vendas no negativo).")
+    
+    st.markdown("---")
     filiais_disp = sorted([f for f in df_est['FILIAL'].unique() if f.strip() != ""])
     filiais_selecionadas = st.multiselect("Filtrar por Filial:", options=filiais_disp, default=filiais_disp)
-    
-    cobertura_alvo = st.number_input("Estoque de Segurança (Dias):", min_value=1, max_value=60, value=15, help="Se o estoque cobrir menos dias que isso, será considerado Risco de Ruptura.")
 
-# --- MOTOR DE CÁLCULO DE RUPTURA E PERDA ---
+# --- MOTOR DE CÁLCULO ---
 hoje = pd.Timestamp(datetime.date.today())
 data_corte = hoje - pd.Timedelta(days=dias_analise)
 
@@ -198,7 +185,6 @@ df_master['TOTAL_VENDIDO'] = df_master['TOTAL_VENDIDO'].fillna(0)
 df_master['VENDA_DIA'] = df_master['VENDA_DIA'].fillna(0)
 df_master['ULTIMA_VENDA'] = df_master['ULTIMA_VENDA'].fillna(pd.NaT)
 
-# Trazer Descrição e Preço de Venda do Cadastro (SB1)
 if not df_cad.empty:
     df_cad_unique = df_cad.drop_duplicates(subset=['CODIGO'])
     df_master = pd.merge(df_master, df_cad_unique[['CODIGO', 'DESCRIÇÃO', 'PRECO_VENDA']], on='CODIGO', how='left')
@@ -208,7 +194,6 @@ else:
     df_master['DESCRIÇÃO'] = "S/D"
     df_master['PRECO_VENDA'] = 0.0
 
-# Trazer Curva ABC
 df_master['CURVA'] = "C"
 if not df_curva.empty:
     if 'FILIAL' in df_curva.columns and not df_curva['FILIAL'].eq("").all():
@@ -222,32 +207,45 @@ if not df_curva.empty:
     elif 'CURVA' in df_master.columns:
         df_master['CURVA'] = df_master['CURVA'].fillna("C")
 
-# --- LÓGICA CORE ---
+# --- LÓGICA CORE: DIAS SEM VENDA & COBERTURA ---
 df_master['DIAS_COBERTURA'] = df_master.apply(
     lambda r: (r['SALDO'] / r['VENDA_DIA']) if (r['VENDA_DIA'] > 0 and r['SALDO'] > 0) else (999 if r['SALDO'] > 0 else 0), axis=1
 )
 
-def calcular_perda(row):
-    if row['SALDO'] <= 0 and row['VENDA_DIA'] > 0:
-        dias_zerado = 0
-        if pd.notna(row['ULTIMA_VENDA']):
-            dias_zerado = (hoje - row['ULTIMA_VENDA']).days
-            if dias_zerado < 0: dias_zerado = 0
-        
-        perda_diaria_rs = row['VENDA_DIA'] * row['PRECO_VENDA']
-        perda_acumulada_rs = dias_zerado * perda_diaria_rs
-        
-        return pd.Series([dias_zerado, perda_diaria_rs, perda_acumulada_rs, "Ruptura"])
-        
-    elif row['SALDO'] > 0 and row['VENDA_DIA'] > 0 and row['DIAS_COBERTURA'] <= cobertura_alvo:
-        return pd.Series([0, 0.0, 0.0, "Risco"])
-        
-    elif row['SALDO'] > 0 and row['VENDA_DIA'] == 0:
-        return pd.Series([0, 0.0, 0.0, "Sem Giro"])
-        
-    return pd.Series([0, 0.0, 0.0, "Saudável"])
+def classificar_status(row):
+    dias_sem_venda = dias_analise # Valor máximo padrão caso nunca tenha vendido
+    if pd.notna(row['ULTIMA_VENDA']):
+        dias_sem_venda = (hoje - row['ULTIMA_VENDA']).days
+        if dias_sem_venda < 0: dias_sem_venda = 0
 
-df_master[['DIAS_ZERADO', 'PERDA_DIARIA_RS', 'PERDA_ACUMULADA_RS', 'STATUS']] = df_master.apply(calcular_perda, axis=1)
+    perda_diaria = 0.0
+    perda_acumulada = 0.0
+    status = "Sem Giro"
+
+    # Se zerou e vendia
+    if row['SALDO'] <= 0 and row['VENDA_DIA'] > 0:
+        if dias_sem_venda >= dias_ruptura:
+            perda_diaria = row['VENDA_DIA'] * row['PRECO_VENDA']
+            perda_acumulada = dias_sem_venda * perda_diaria
+            status = "Ruptura"
+        else:
+            status = "Venda no Negativo"
+            
+    # Se tem saldo, mas vende pouco para a cobertura alvo
+    elif row['SALDO'] > 0 and row['VENDA_DIA'] > 0 and row['DIAS_COBERTURA'] <= cobertura_alvo:
+        status = "Risco"
+        
+    # Se tem saldo e vende bem
+    elif row['SALDO'] > 0 and row['VENDA_DIA'] > 0 and row['DIAS_COBERTURA'] > cobertura_alvo:
+        status = "Saudável"
+        
+    # Se tem saldo, mas nunca vende
+    elif row['SALDO'] > 0 and row['VENDA_DIA'] == 0:
+        status = "Sem Giro"
+        
+    return pd.Series([dias_sem_venda, perda_diaria, perda_acumulada, status])
+
+df_master[['DIAS_SEM_VENDA', 'PERDA_DIARIA_RS', 'PERDA_ACUMULADA_RS', 'STATUS']] = df_master.apply(classificar_status, axis=1)
 
 if filiais_selecionadas:
     df_master = df_master[df_master['FILIAL'].isin(filiais_selecionadas)]
@@ -257,77 +255,86 @@ st.markdown("### 📊 Resumo de Impacto em Vendas")
 
 df_ruptura = df_master[df_master['STATUS'] == 'Ruptura']
 df_risco = df_master[df_master['STATUS'] == 'Risco']
+df_negativo = df_master[df_master['STATUS'] == 'Venda no Negativo']
 
 total_skus_ruptura = len(df_ruptura)
 perda_diaria_total = df_ruptura['PERDA_DIARIA_RS'].sum()
 perda_acumulada_total = df_ruptura['PERDA_ACUMULADA_RS'].sum()
-skus_risco = len(df_risco)
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("SKUs em Ruptura (Estoque Zero)", f"{total_skus_ruptura} itens", delta="- Crítico", delta_color="inverse")
-col2.metric("Perda Diária Atual Estimada", f"R$ {perda_diaria_total:,.2f}", delta="Custo Diário da Ruptura", delta_color="inverse")
-col3.metric("Venda Perdida Acumulada", f"R$ {perda_acumulada_total:,.2f}", help="Baseado na Venda Média Diária x Dias desde a Última Venda registrada.")
-col4.metric(f"Risco (Cobre < {cobertura_alvo} dias)", f"{skus_risco} itens", delta="Atenção Compras", delta_color="off")
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("SKUs em Ruptura (Perdendo Venda)", f"{total_skus_ruptura}", delta=f"Sem giro há +{dias_ruptura}d", delta_color="inverse")
+col2.metric("Perda Diária Estimada", f"R$ {perda_diaria_total:,.2f}", delta="Impacto Financeiro", delta_color="inverse")
+col3.metric("Perda Acumulada", f"R$ {perda_acumulada_total:,.2f}", help="Venda Média Diária x Dias Sem Venda.")
+col4.metric(f"Risco (Cobertura < {cobertura_alvo}d)", f"{len(df_risco)} itens", delta="Atenção Compras", delta_color="off")
+col5.metric(f"Venda no Negativo", f"{len(df_negativo)} itens", delta="Furo de Estoque", delta_color="off")
 
 st.divider()
 
 cols_view = [
     'FILIAL', 'CODIGO', 'DESCRIÇÃO', 'CURVA', 'SALDO', 'VENDA_DIA', 
-    'DIAS_COBERTURA', 'ULTIMA_VENDA', 'DIAS_ZERADO', 'PERDA_DIARIA_RS', 'PERDA_ACUMULADA_RS'
+    'DIAS_COBERTURA', 'ULTIMA_VENDA', 'DIAS_SEM_VENDA', 'PERDA_DIARIA_RS', 'PERDA_ACUMULADA_RS'
 ]
 
-aba_ruptura, aba_risco, aba_saudavel, aba_sem_giro = st.tabs([
+aba_ruptura, aba_risco, aba_negativo, aba_saudavel, aba_sem_giro = st.tabs([
     "🚨 Ruptura Atual (Perdendo Dinheiro)", 
     "⚠️ Risco de Ruptura Futura", 
+    "👻 Venda no Negativo",
     "✅ Estoque Saudável", 
     "💤 Sem Giro no Período"
 ])
 
 with aba_ruptura:
-    st.markdown("#### Produtos Zerados com Giro Confirmado")
-    st.write("Estes itens estão com Saldo Zero e possuem histórico de vendas recente. A tabela mostra a estimativa de dinheiro que a loja está deixando de faturar.")
-    
+    st.write(f"Itens com Saldo Zero e que não registram vendas há pelo menos **{dias_ruptura} dias**.")
     df_view_ruptura = df_ruptura.sort_values(by='PERDA_DIARIA_RS', ascending=False)[cols_view].copy()
     
     df_view_ruptura['ULTIMA_VENDA'] = df_view_ruptura['ULTIMA_VENDA'].dt.strftime('%d/%m/%Y')
     df_view_ruptura['VENDA_DIA'] = df_view_ruptura['VENDA_DIA'].apply(lambda x: f"{x:.2f} un/dia")
     df_view_ruptura['PERDA_DIARIA_RS'] = df_view_ruptura['PERDA_DIARIA_RS'].apply(lambda x: f"R$ {x:,.2f}")
     df_view_ruptura['PERDA_ACUMULADA_RS'] = df_view_ruptura['PERDA_ACUMULADA_RS'].apply(lambda x: f"R$ {x:,.2f}")
+    df_view_ruptura['DIAS_SEM_VENDA'] = df_view_ruptura['DIAS_SEM_VENDA'].apply(lambda x: f"{x} dias")
     df_view_ruptura['DIAS_COBERTURA'] = "-"
     
     st.dataframe(df_view_ruptura, use_container_width=True, hide_index=True)
 
 with aba_risco:
-    st.markdown(f"#### Alerta: Cobertura menor que {cobertura_alvo} dias")
-    st.write("Estes itens ainda têm saldo na loja, mas a velocidade de saída é alta. Acione Compras para evitar que entrem em ruptura.")
-    
-    df_view_risco = df_risco.sort_values(by='DIAS_COBERTURA', ascending=True)[cols_view].drop(columns=['DIAS_ZERADO', 'PERDA_ACUMULADA_RS', 'PERDA_DIARIA_RS', 'ULTIMA_VENDA']).copy()
+    st.write(f"Itens com saldo na loja, mas que a velocidade de saída cobre menos que os **{cobertura_alvo} dias** de segurança estabelecidos.")
+    df_view_risco = df_risco.sort_values(by='DIAS_COBERTURA', ascending=True)[cols_view].drop(columns=['PERDA_ACUMULADA_RS', 'PERDA_DIARIA_RS', 'ULTIMA_VENDA']).copy()
     
     df_view_risco['VENDA_DIA'] = df_view_risco['VENDA_DIA'].apply(lambda x: f"{x:.2f} un/dia")
     df_view_risco['DIAS_COBERTURA'] = df_view_risco['DIAS_COBERTURA'].apply(lambda x: f"{x:.1f} dias")
+    df_view_risco['DIAS_SEM_VENDA'] = df_view_risco['DIAS_SEM_VENDA'].apply(lambda x: f"{x} dias")
     
     st.dataframe(df_view_risco, use_container_width=True, hide_index=True)
 
-with aba_saudavel:
-    st.markdown("#### Produtos Saudáveis (Com Giro e Cobertura Segura)")
-    st.write("Estes itens registraram vendas no período e possuem saldo suficiente para cobrir os dias alvo de segurança.")
+with aba_negativo:
+    st.write("Itens que estão com Saldo <= 0 no sistema, mas **continuam vendendo** (registraram saída muito recentemente). Isso indica furo de estoque.")
+    df_view_neg = df_negativo.sort_values(by='DIAS_SEM_VENDA', ascending=True)[cols_view].drop(columns=['PERDA_ACUMULADA_RS', 'PERDA_DIARIA_RS']).copy()
     
+    df_view_neg['ULTIMA_VENDA'] = df_view_neg['ULTIMA_VENDA'].dt.strftime('%d/%m/%Y')
+    df_view_neg['VENDA_DIA'] = df_view_neg['VENDA_DIA'].apply(lambda x: f"{x:.2f} un/dia")
+    df_view_neg['DIAS_SEM_VENDA'] = df_view_neg['DIAS_SEM_VENDA'].apply(lambda x: f"{x} dias")
+    df_view_neg['DIAS_COBERTURA'] = "-"
+    
+    st.dataframe(df_view_neg, use_container_width=True, hide_index=True)
+
+with aba_saudavel:
+    st.write("Itens que registraram vendas no período e possuem saldo suficiente para cobrir os dias de segurança.")
     df_ok = df_master[df_master['STATUS'] == 'Saudável'].copy()
-    df_view_ok = df_ok.sort_values(by='DIAS_COBERTURA', ascending=True)[['FILIAL', 'CODIGO', 'DESCRIÇÃO', 'CURVA', 'SALDO', 'VENDA_DIA', 'DIAS_COBERTURA']].copy()
+    df_view_ok = df_ok.sort_values(by='DIAS_COBERTURA', ascending=True)[['FILIAL', 'CODIGO', 'DESCRIÇÃO', 'CURVA', 'SALDO', 'VENDA_DIA', 'DIAS_SEM_VENDA', 'DIAS_COBERTURA']].copy()
     
     df_view_ok['VENDA_DIA'] = df_view_ok['VENDA_DIA'].apply(lambda x: f"{x:.2f} un/dia")
+    df_view_ok['DIAS_SEM_VENDA'] = df_view_ok['DIAS_SEM_VENDA'].apply(lambda x: f"{x} dias")
     df_view_ok['DIAS_COBERTURA'] = df_view_ok['DIAS_COBERTURA'].apply(lambda r: f"{r:.0f} dias")
     
     st.dataframe(df_view_ok, use_container_width=True, hide_index=True)
 
 with aba_sem_giro:
-    st.markdown("#### Produtos Sem Saída")
-    st.write(f"Estes itens possuem saldo em estoque, mas não registraram nenhuma venda nos últimos **{dias_analise} dias** analisados.")
-    
+    st.write(f"Itens com saldo em estoque, mas que não registraram NENHUMA venda nos últimos **{dias_analise} dias** analisados.")
     df_sg = df_master[df_master['STATUS'] == 'Sem Giro'].copy()
-    df_view_sg = df_sg.sort_values(by='SALDO', ascending=False)[['FILIAL', 'CODIGO', 'DESCRIÇÃO', 'CURVA', 'SALDO', 'VENDA_DIA', 'DIAS_COBERTURA']].copy()
+    df_view_sg = df_sg.sort_values(by='SALDO', ascending=False)[['FILIAL', 'CODIGO', 'DESCRIÇÃO', 'CURVA', 'SALDO', 'VENDA_DIA', 'DIAS_SEM_VENDA', 'DIAS_COBERTURA']].copy()
     
     df_view_sg['VENDA_DIA'] = "0.00 un/dia"
+    df_view_sg['DIAS_SEM_VENDA'] = df_view_sg['DIAS_SEM_VENDA'].apply(lambda x: f"+{x} dias")
     df_view_sg['DIAS_COBERTURA'] = "Sem Giro (999+)"
     
     st.dataframe(df_view_sg, use_container_width=True, hide_index=True)
