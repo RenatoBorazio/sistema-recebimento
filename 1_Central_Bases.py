@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from sqlalchemy import text
 
 st.set_page_config(page_title="Central de Bases - Protheus", layout="wide")
 
@@ -91,40 +92,37 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                     
                     df.columns = deduplicar_colunas(df.columns)
 
-                    # --- NOVA LÓGICA INCREMENTAL (ANTI-JOIN DE ALTA VELOCIDADE) ---
+                    # --- LÓGICA INCREMENTAL NATIVA NO BANCO (SUPER RÁPIDA E SEM TIMEOUT) ---
                     if nome_tabela in ["sd2_saidas", "kardex_movimentos"] and "Incremental" in modo_upload:
-                        st.text("🔄 Consultando banco de dados para separar apenas linhas inéditas...")
-                        try:
-                            df_banco = conn.query(f"SELECT * FROM {nome_tabela}", ttl=0).astype(str)
-                            
-                            # Limpeza para garantir comparação perfeita
-                            df_limpo = df.astype(str).apply(lambda x: x.str.strip())
-                            df_banco_limpo = df_banco.apply(lambda x: x.str.strip())
-                            
-                            # Manter apenas colunas que coincidem nas duas tabelas
-                            colunas_comuns = [c for c in df_limpo.columns if c in df_banco_limpo.columns]
-                            
-                            # Remove duplicadas dentro do arquivo recém-subido
-                            df_limpo = df_limpo.drop_duplicates(subset=colunas_comuns)
-                            
-                            # Pulo do gato: Anti-Join para separar O QUE NÃO EXISTE NO BANCO AINDA
-                            df_merge = pd.merge(df_limpo, df_banco_limpo, on=colunas_comuns, how='left', indicator=True)
-                            df_inserir = df_merge[df_merge['_merge'] == 'left_only'].drop(columns=['_merge'])
-                            
-                            if not df_inserir.empty:
-                                st.text(f"🚀 Inserindo {len(df_inserir)} novas linhas identificadas...")
-                                # Usa APPEND ao invés de REPLACE (nunca derruba a tabela, não dá timeout)
-                                df_inserir.to_sql(nome_tabela, con=conn.engine, if_exists='append', index=False, chunksize=5000)
-                                st.success(f"✅ {len(df_inserir)} novas linhas incorporadas ao {nome_amigavel} com sucesso!")
-                            else:
-                                st.success(f"✅ Nenhuma linha nova encontrada. A base já estava totalmente atualizada com os dados deste arquivo!")
-                                
-                        except Exception as e:
-                            # Se a tabela ainda não existe no banco, cria ela pela primeira vez
-                            df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=5000)
-                            st.success(f"✅ Primeira carga histórica do {nome_amigavel} criada com sucesso!")
+                        st.text("🚀 Injetando os novos dados na nuvem...")
+                        
+                        # 1. Faz o append direto. Se a tabela não existe, ele cria. Se existe, adiciona. (Não dá lock no banco)
+                        df.to_sql(nome_tabela, con=conn.engine, if_exists='append', index=False, chunksize=5000)
+
+                        st.text("🧹 Removendo dados duplicados diretamente no servidor do PostgreSQL...")
+                        
+                        # 2. Pega as colunas da tabela para fazer a deduplicação exata
+                        df_cols = conn.query(f"SELECT * FROM {nome_tabela} LIMIT 0", ttl=0)
+                        colunas_banco = [f'"{str(c)}"' for c in df_cols.columns]
+                        group_by_clause = ", ".join(colunas_banco)
+
+                        # 3. Executa a deleção de duplicatas usando o motor do banco (CTID)
+                        sql_dedup = f"""
+                            DELETE FROM {nome_tabela}
+                            WHERE ctid NOT IN (
+                                SELECT max(ctid)
+                                FROM {nome_tabela}
+                                GROUP BY {group_by_clause}
+                            );
+                        """
+                        with conn.session as s:
+                            s.execute(text(sql_dedup))
+                            s.commit()
+
+                        st.success(f"✅ Arquivo incorporado e duplicidades removidas com sucesso na nuvem!")
+                        
                     else:
-                        # Tabelas normais ou modo Substituição Completa (Apenas bases pequenas ou setup inicial)
+                        # Modo Substituição Completa (Recomendado apenas para a primeira carga ou ficheiros pequenos)
                         df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=10000)
                         st.success(f"✅ {nome_amigavel} atualizado com sucesso (Substituição Completa)!")
                         
@@ -133,4 +131,4 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                     
     st.write("---")
 
-st.info("💡 Quando você clica em 'Subir para o Banco', a tabela é atualizada instantaneamente para todos os usuários.")
+st.info("💡 Quando clica em 'Subir para o Banco', a tabela é atualizada instantaneamente para todos os utilizadores.")
