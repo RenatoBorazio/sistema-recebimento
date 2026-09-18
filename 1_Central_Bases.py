@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import io
 from sqlalchemy import text
 
 st.set_page_config(page_title="Central de Bases - Protheus", layout="wide")
@@ -45,7 +44,7 @@ def carregar_dataframe(arquivo_enviado):
     amostra = b"".join(linhas[:10]).decode(encoding, errors='ignore')
     sep = ';' if amostra.count(';') >= amostra.count(',') else ','
     
-    # Identifica a linha onde as colunas de verdade começam (ignora a palavra "SD2" sozinha)
+    # Identifica a linha onde as colunas de verdade começam
     skip_idx = 0
     for i, l in enumerate(linhas):
         if l.decode(encoding, errors='ignore').count(sep) >= 3:
@@ -77,7 +76,7 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
     # --- MODO INCREMENTAL ---
     modo_upload = "Substituir Tudo"
     if nome_tabela in ["sd2_saidas", "kardex_movimentos"]:
-        st.info(f"💡 Como o {nome_amigavel} costuma ser muito grande, você pode subir apenas a planilha dos dias faltantes. O sistema identificará apenas as linhas novas.")
+        st.info(f"💡 Como o {nome_amigavel} costuma ser muito grande, pode subir apenas a planilha dos dias faltantes. O sistema identificará apenas as linhas novas.")
         modo_upload = st.radio(
             "Modo de atualização:", 
             ["Adicionar Dias Novos (Incremental)", "Substituir Base Completa (Zerar histórico)"],
@@ -88,12 +87,11 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
     
     if arquivo_enviado is not None:
         if st.button(f"Subir {nome_amigavel} para o Banco", key=f"btn_{nome_tabela}", type="primary"):
-            with st.spinner(f"Processando e enviando {nome_tabela} para a Nuvem..."):
+            with st.spinner(f"A processar e a enviar {nome_tabela} para a Nuvem..."):
                 try:
-                    # Leitura Antibug
                     df = carregar_dataframe(arquivo_enviado)
                     
-                    # Raio-X de Cabeçalhos (Para Excel e sujeiras remanescentes)
+                    # Raio-X de Cabeçalhos
                     colunas_atuais = " ".join([str(c).upper() for c in df.columns])
                     tem_chave = any(palavra in colunas_atuais for palavra in ["PRODUTO", "CODIGO", "CÓDIGO", "FILIAL"])
                     
@@ -108,35 +106,50 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                     
                     df.columns = deduplicar_colunas(df.columns)
 
-                    # --- LÓGICA INCREMENTAL NATIVA NO BANCO ---
+                    # --- LÓGICA INCREMENTAL NATIVA NO BANCO COM ALINHAMENTO DE COLUNAS ---
                     if nome_tabela in ["sd2_saidas", "kardex_movimentos"] and "Incremental" in modo_upload:
-                        st.text("🚀 Injetando os novos dados na nuvem...")
-                        df.to_sql(nome_tabela, con=conn.engine, if_exists='append', index=False, chunksize=5000)
+                        st.text("🚀 A alinhar colunas e a injetar os novos dados na nuvem...")
+                        
+                        try:
+                            # 1. Puxa as colunas oficiais da base de dados (sem baixar as linhas)
+                            df_cols_banco = conn.query(f"SELECT * FROM {nome_tabela} LIMIT 0", ttl=0)
+                            colunas_no_banco = df_cols_banco.columns.tolist()
 
-                        st.text("🧹 Removendo dados duplicados diretamente no servidor...")
-                        df_cols = conn.query(f"SELECT * FROM {nome_tabela} LIMIT 0", ttl=0)
-                        colunas_banco = [f'"{str(c)}"' for c in df_cols.columns]
-                        group_by_clause = ", ".join(colunas_banco)
+                            # 2. Filtra o ficheiro carregado para enviar APENAS as colunas que existem na base
+                            colunas_em_comum = [c for c in df.columns if c in colunas_no_banco]
+                            df_alinhado = df[colunas_em_comum]
 
-                        sql_dedup = f"""
-                            DELETE FROM {nome_tabela}
-                            WHERE ctid NOT IN (
-                                SELECT max(ctid)
-                                FROM {nome_tabela}
-                                GROUP BY {group_by_clause}
-                            );
-                        """
-                        with conn.session as s:
-                            s.execute(text(sql_dedup))
-                            s.commit()
+                            # 3. Faz o append seguro apenas com os dados filtrados
+                            df_alinhado.to_sql(nome_tabela, con=conn.engine, if_exists='append', index=False, chunksize=5000)
 
-                        st.success(f"✅ Arquivo incorporado e duplicidades removidas com sucesso na nuvem!")
+                            st.text("🧹 A remover dados duplicados diretamente no servidor...")
+                            colunas_banco_formatadas = [f'"{str(c)}"' for c in colunas_no_banco]
+                            group_by_clause = ", ".join(colunas_banco_formatadas)
+
+                            sql_dedup = f"""
+                                DELETE FROM {nome_tabela}
+                                WHERE ctid NOT IN (
+                                    SELECT max(ctid)
+                                    FROM {nome_tabela}
+                                    GROUP BY {group_by_clause}
+                                );
+                            """
+                            with conn.session as s:
+                                s.execute(text(sql_dedup))
+                                s.commit()
+
+                            st.success(f"✅ Ficheiro incorporado e duplicidades removidas com sucesso na nuvem!")
+                            
+                        except Exception as e:
+                            # Se a tabela ainda não existir na nuvem, cria a base do zero
+                            df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=10000)
+                            st.success(f"✅ Primeira carga histórica do {nome_amigavel} criada com sucesso!")
                         
                     else:
                         df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=10000)
                         st.success(f"✅ {nome_amigavel} atualizado com sucesso (Substituição Completa)!")
                         
                 except Exception as e:
-                    st.error(f"Erro ao atualizar a base: {e}")
+                    st.error(f"Erro ao atualizar a base de dados: {e}")
                     
     st.write("---")
