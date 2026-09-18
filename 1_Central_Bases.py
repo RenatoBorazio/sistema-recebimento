@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import io
 from sqlalchemy import text
 
 st.set_page_config(page_title="Central de Bases - Protheus", layout="wide")
@@ -22,15 +23,39 @@ bases_esperadas = {
     "Movimentações (Kardex)": "kardex_movimentos"
 }
 
-def detectar_separador(arquivo_enviado, encoding):
-    """Detecta se o arquivo usa ';' ou ',' olhando as primeiras linhas."""
+def carregar_dataframe(arquivo_enviado):
+    """Lê o arquivo ignorando os lixos do Protheus nas primeiras linhas"""
+    if arquivo_enviado.name.lower().endswith('.xlsx'):
+        return pd.read_excel(arquivo_enviado, dtype=str)
+    
+    # Para CSV e TXT do Protheus
     arquivo_enviado.seek(0)
-    amostra = "".join([arquivo_enviado.readline().decode(encoding, errors='ignore') for _ in range(5)])
+    bytes_data = arquivo_enviado.read()
+    
+    # Descobre o Encoding (utf-8 ou latin1)
+    encoding = 'utf-8'
+    try:
+        bytes_data.decode('utf-8')
+    except UnicodeDecodeError:
+        encoding = 'latin1'
+        
+    linhas = bytes_data.split(b'\n')
+    
+    # Detecta o separador correto
+    amostra = b"".join(linhas[:10]).decode(encoding, errors='ignore')
+    sep = ';' if amostra.count(';') >= amostra.count(',') else ','
+    
+    # Identifica a linha onde as colunas de verdade começam (ignora a palavra "SD2" sozinha)
+    skip_idx = 0
+    for i, l in enumerate(linhas):
+        if l.decode(encoding, errors='ignore').count(sep) >= 3:
+            skip_idx = i
+            break
+            
     arquivo_enviado.seek(0)
-    return ';' if amostra.count(';') >= amostra.count(',') else ','
+    return pd.read_csv(arquivo_enviado, dtype=str, encoding=encoding, sep=sep, skiprows=skip_idx)
 
 def deduplicar_colunas(colunas):
-    """Renomeia colunas repetidas para evitar erro no banco."""
     contagem = {}
     novas = []
     for c in colunas:
@@ -45,7 +70,7 @@ def deduplicar_colunas(colunas):
 
 st.divider()
 
-# 3. Criando a interface de upload para cada arquivo
+# 3. Criando a interface de upload
 for nome_amigavel, nome_tabela in bases_esperadas.items():
     st.subheader(f"Atualizar {nome_amigavel}")
     
@@ -65,23 +90,14 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
         if st.button(f"Subir {nome_amigavel} para o Banco", key=f"btn_{nome_tabela}", type="primary"):
             with st.spinner(f"Processando e enviando {nome_tabela} para a Nuvem..."):
                 try:
-                    if arquivo_enviado.name.lower().endswith('.xlsx'):
-                        df = pd.read_excel(arquivo_enviado, dtype=str)
-                    else:
-                        try:
-                            sep = detectar_separador(arquivo_enviado, 'utf-8')
-                            df = pd.read_csv(arquivo_enviado, dtype=str, encoding='utf-8', sep=sep)
-                        except UnicodeDecodeError:
-                            arquivo_enviado.seek(0)
-                            sep = detectar_separador(arquivo_enviado, 'latin1')
-                            df = pd.read_csv(arquivo_enviado, dtype=str, encoding='latin1', sep=sep)
+                    # Leitura Antibug
+                    df = carregar_dataframe(arquivo_enviado)
                     
-                    # Limpeza Inteligente de Cabeçalhos
+                    # Raio-X de Cabeçalhos (Para Excel e sujeiras remanescentes)
                     colunas_atuais = " ".join([str(c).upper() for c in df.columns])
                     tem_chave = any(palavra in colunas_atuais for palavra in ["PRODUTO", "CODIGO", "CÓDIGO", "FILIAL"])
-                    precisa_ajustar = not tem_chave
                     
-                    if precisa_ajustar:
+                    if not tem_chave:
                         for i in range(min(25, len(df))):
                             linha_atual = " ".join([str(x).upper() for x in df.iloc[i].values])
                             if "PRODUTO" in linha_atual or "CODIGO" in linha_atual or "CÓDIGO" in linha_atual or "FILIAL" in linha_atual:
@@ -92,21 +108,16 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                     
                     df.columns = deduplicar_colunas(df.columns)
 
-                    # --- LÓGICA INCREMENTAL NATIVA NO BANCO (SUPER RÁPIDA E SEM TIMEOUT) ---
+                    # --- LÓGICA INCREMENTAL NATIVA NO BANCO ---
                     if nome_tabela in ["sd2_saidas", "kardex_movimentos"] and "Incremental" in modo_upload:
                         st.text("🚀 Injetando os novos dados na nuvem...")
-                        
-                        # 1. Faz o append direto. Se a tabela não existe, ele cria. Se existe, adiciona. (Não dá lock no banco)
                         df.to_sql(nome_tabela, con=conn.engine, if_exists='append', index=False, chunksize=5000)
 
-                        st.text("🧹 Removendo dados duplicados diretamente no servidor do PostgreSQL...")
-                        
-                        # 2. Pega as colunas da tabela para fazer a deduplicação exata
+                        st.text("🧹 Removendo dados duplicados diretamente no servidor...")
                         df_cols = conn.query(f"SELECT * FROM {nome_tabela} LIMIT 0", ttl=0)
                         colunas_banco = [f'"{str(c)}"' for c in df_cols.columns]
                         group_by_clause = ", ".join(colunas_banco)
 
-                        # 3. Executa a deleção de duplicatas usando o motor do banco (CTID)
                         sql_dedup = f"""
                             DELETE FROM {nome_tabela}
                             WHERE ctid NOT IN (
@@ -122,7 +133,6 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                         st.success(f"✅ Arquivo incorporado e duplicidades removidas com sucesso na nuvem!")
                         
                     else:
-                        # Modo Substituição Completa (Recomendado apenas para a primeira carga ou ficheiros pequenos)
                         df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=10000)
                         st.success(f"✅ {nome_amigavel} atualizado com sucesso (Substituição Completa)!")
                         
@@ -130,5 +140,3 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                     st.error(f"Erro ao atualizar a base: {e}")
                     
     st.write("---")
-
-st.info("💡 Quando clica em 'Subir para o Banco', a tabela é atualizada instantaneamente para todos os utilizadores.")
