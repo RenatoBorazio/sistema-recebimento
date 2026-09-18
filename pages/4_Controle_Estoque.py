@@ -143,7 +143,7 @@ def carregar_dados():
             df_curva['FILIAL'] = df_curva_raw[c_fil_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip() if c_fil_curva else ""
     except: df_curva = pd.DataFrame()
 
-    # 5. Carregar Kardex (Movimentação Histórica)
+    # 5. Carregar Kardex (Movimentação Histórica com Diagnóstico)
     try:
         df_cols_kardex = conn.query("SELECT * FROM kardex_movimentos LIMIT 1", ttl=0)
         colunas_reais_kardex = df_cols_kardex.columns.tolist()
@@ -155,11 +155,11 @@ def carregar_dados():
                     return f'"{colunas_reais_kardex[i]}"'
             return None
 
-        c_k_fil = acha_nome_real_kardex(['FILIAL'])
-        c_k_cod = acha_nome_real_kardex(['CODIGO', 'CÓDIGO', 'PRODUTO'])
-        c_k_tipo = acha_nome_real_kardex(['TIPO DO MOVIMENTO', 'TIPO MOVIMENTO', 'TIPO'])
-        c_k_saldo = acha_nome_real_kardex(['SALDO QUANTIDADE', 'SALDO', 'SALDO ATUAL'])
-        c_k_data = acha_nome_real_kardex(['EMISSAO', 'EMISSÃO', 'DATA', 'DATA MOVIMENTO', 'DATA DO MOVIMENTO'])
+        c_k_fil = acha_nome_real_kardex(['FILIAL', 'LOJA'])
+        c_k_cod = acha_nome_real_kardex(['CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO PRODUTO'])
+        c_k_tipo = acha_nome_real_kardex(['TIPO DO MOVIMENTO', 'TIPO MOVIMENTO', 'TIPO', 'TM'])
+        c_k_saldo = acha_nome_real_kardex(['SALDO QUANTIDADE', 'SALDO', 'SALDO ATUAL', 'QTD SALDO'])
+        c_k_data = acha_nome_real_kardex(['EMISSAO', 'EMISSÃO', 'DATA', 'DATA MOVIMENTO', 'DATA DO MOVIMENTO', 'DATA DA MOVIMENTACAO', 'DT MOV'])
 
         df_kardex = pd.DataFrame()
         if c_k_cod and c_k_tipo and c_k_saldo and c_k_data:
@@ -169,11 +169,11 @@ def carregar_dados():
             df_k_raw = conn.query(query_kardex, ttl=0).astype(str)
             df_k_raw.columns = [str(c).upper().strip() for c in df_k_raw.columns]
             
-            c_f = obter_primeira_coluna(df_k_raw, ['FILIAL'])
-            c_c = obter_primeira_coluna(df_k_raw, ['CODIGO', 'CÓDIGO', 'PRODUTO'])
-            c_t = obter_primeira_coluna(df_k_raw, ['TIPO DO MOVIMENTO', 'TIPO MOVIMENTO', 'TIPO'])
-            c_s = obter_primeira_coluna(df_k_raw, ['SALDO QUANTIDADE', 'SALDO', 'SALDO ATUAL'])
-            c_d = obter_primeira_coluna(df_k_raw, ['EMISSAO', 'EMISSÃO', 'DATA', 'DATA MOVIMENTO', 'DATA DO MOVIMENTO'])
+            c_f = obter_primeira_coluna(df_k_raw, ['FILIAL', 'LOJA'])
+            c_c = obter_primeira_coluna(df_k_raw, ['CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO PRODUTO'])
+            c_t = obter_primeira_coluna(df_k_raw, ['TIPO DO MOVIMENTO', 'TIPO MOVIMENTO', 'TIPO', 'TM'])
+            c_s = obter_primeira_coluna(df_k_raw, ['SALDO QUANTIDADE', 'SALDO', 'SALDO ATUAL', 'QTD SALDO'])
+            c_d = obter_primeira_coluna(df_k_raw, ['EMISSAO', 'EMISSÃO', 'DATA', 'DATA MOVIMENTO', 'DATA DO MOVIMENTO', 'DATA DA MOVIMENTACAO', 'DT MOV'])
             
             df_kardex['FILIAL'] = df_k_raw[c_f].replace(r'\.0$', '', regex=True).str.strip() if c_f else ""
             df_kardex['CODIGO'] = df_k_raw[c_c].replace(r'\.0$', '', regex=True).str.strip()
@@ -187,9 +187,16 @@ def carregar_dados():
             
             df_kardex = df_kardex.dropna(subset=['DATA']).sort_values(by=['FILIAL', 'CODIGO', 'DATA'])
         else:
-            erros_log.append("Kardex: Tabela mapeada mas as colunas Data, Tipo e Saldo não foram encontradas.")
+            faltantes = []
+            if not c_k_cod: faltantes.append('CODIGO')
+            if not c_k_tipo: faltantes.append('TIPO DO MOVIMENTO')
+            if not c_k_saldo: faltantes.append('SALDO')
+            if not c_k_data: faltantes.append('DATA')
+            erros_log.append(f"Kardex: Faltam colunas na base que subiu. Não encontrei as colunas: {', '.join(faltantes)}")
+            
     except Exception as e:
         df_kardex = pd.DataFrame()
+        erros_log.append(f"Erro ao consultar Kardex no banco de dados: {e}")
 
     return df_cad, df_est, df_sd2, df_curva, df_kardex, erros_log
 
@@ -411,6 +418,13 @@ with aba_sem_giro:
 
 with aba_historico:
     st.markdown("#### Prejuízo Histórico por Ruptura (Kardex)")
+    
+    erros_kardex = [e for e in erros_log if "Kardex" in e]
+    if erros_kardex:
+        st.error("⚠️ O arquivo do Kardex foi encontrado no banco de dados, mas o sistema não conseguiu ler as colunas. Veja o motivo exato abaixo:")
+        for erro in erros_kardex:
+            st.code(erro)
+            
     if not df_kardex.empty:
         st.write("Esta aba rastreia o histórico no Kardex identificando quando o estoque zerou e parou de vender, calculando todo o dinheiro perdido até o retorno do produto.")
         
