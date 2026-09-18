@@ -98,7 +98,7 @@ def carregar_dados():
         c_filial_sql = acha_nome_real(['FILIAL', 'D2_FILIAL'])
         c_prod_sql = acha_nome_real(['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO'])
         c_qtd_sql = acha_nome_real(['QUANTIDADE', 'QTD', 'D2_QUANT'])
-        c_emissao_sql = acha_nome_real(['EMISSAO', 'EMISSÃO', 'DATA', 'D2_EMISSAO'])
+        c_emissao_sql = acha_nome_real(['EMISSAO', 'EMISSÃO', 'DATA', 'D2_EMISSAO', 'DT EMISSAO', 'DT EMISSÃO'])
 
         df_sd2 = pd.DataFrame()
         if c_prod_sql and c_emissao_sql:
@@ -111,7 +111,7 @@ def carregar_dados():
             c_f = obter_primeira_coluna(df_sd2_raw, ['FILIAL', 'D2_FILIAL'])
             c_p = obter_primeira_coluna(df_sd2_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO', 'CÓDIGO'])
             c_q = obter_primeira_coluna(df_sd2_raw, ['QUANTIDADE', 'QTD', 'D2_QUANT'])
-            c_e = obter_primeira_coluna(df_sd2_raw, ['EMISSAO', 'EMISSÃO', 'DATA', 'D2_EMISSAO'])
+            c_e = obter_primeira_coluna(df_sd2_raw, ['EMISSAO', 'EMISSÃO', 'DATA', 'D2_EMISSAO', 'DT EMISSAO', 'DT EMISSÃO'])
 
             df_sd2['FILIAL'] = df_sd2_raw[c_f].replace(r'\.0$', '', regex=True).str.strip() if c_f else ""
             df_sd2['CODIGO'] = df_sd2_raw[c_p].replace(r'\.0$', '', regex=True).str.strip()
@@ -143,7 +143,7 @@ def carregar_dados():
             df_curva['FILIAL'] = df_curva_raw[c_fil_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip() if c_fil_curva else ""
     except: df_curva = pd.DataFrame()
 
-    # 5. Carregar Kardex (Movimentação Histórica com Diagnóstico)
+    # 5. Carregar Kardex (Movimentação Histórica com Diagnóstico Atualizado)
     try:
         df_cols_kardex = conn.query("SELECT * FROM kardex_movimentos LIMIT 1", ttl=0)
         colunas_reais_kardex = df_cols_kardex.columns.tolist()
@@ -159,7 +159,7 @@ def carregar_dados():
         c_k_cod = acha_nome_real_kardex(['CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO PRODUTO'])
         c_k_tipo = acha_nome_real_kardex(['TIPO DO MOVIMENTO', 'TIPO MOVIMENTO', 'TIPO', 'TM'])
         c_k_saldo = acha_nome_real_kardex(['SALDO QUANTIDADE', 'SALDO', 'SALDO ATUAL', 'QTD SALDO'])
-        c_k_data = acha_nome_real_kardex(['EMISSAO', 'EMISSÃO', 'DATA', 'DATA MOVIMENTO', 'DATA DO MOVIMENTO', 'DATA DA MOVIMENTACAO', 'DT MOV'])
+        c_k_data = acha_nome_real_kardex(['EMISSAO', 'EMISSÃO', 'DATA', 'DATA MOVIMENTO', 'DATA DO MOVIMENTO', 'DATA DA MOVIMENTACAO', 'DT MOV', 'DT EMISSAO', 'DT EMISSÃO'])
 
         df_kardex = pd.DataFrame()
         if c_k_cod and c_k_tipo and c_k_saldo and c_k_data:
@@ -173,7 +173,7 @@ def carregar_dados():
             c_c = obter_primeira_coluna(df_k_raw, ['CODIGO', 'CÓDIGO', 'PRODUTO', 'CODIGO PRODUTO'])
             c_t = obter_primeira_coluna(df_k_raw, ['TIPO DO MOVIMENTO', 'TIPO MOVIMENTO', 'TIPO', 'TM'])
             c_s = obter_primeira_coluna(df_k_raw, ['SALDO QUANTIDADE', 'SALDO', 'SALDO ATUAL', 'QTD SALDO'])
-            c_d = obter_primeira_coluna(df_k_raw, ['EMISSAO', 'EMISSÃO', 'DATA', 'DATA MOVIMENTO', 'DATA DO MOVIMENTO', 'DATA DA MOVIMENTACAO', 'DT MOV'])
+            c_d = obter_primeira_coluna(df_k_raw, ['EMISSAO', 'EMISSÃO', 'DATA', 'DATA MOVIMENTO', 'DATA DO MOVIMENTO', 'DATA DA MOVIMENTACAO', 'DT MOV', 'DT EMISSAO', 'DT EMISSÃO'])
             
             df_kardex['FILIAL'] = df_k_raw[c_f].replace(r'\.0$', '', regex=True).str.strip() if c_f else ""
             df_kardex['CODIGO'] = df_k_raw[c_c].replace(r'\.0$', '', regex=True).str.strip()
@@ -200,7 +200,7 @@ def carregar_dados():
 
     return df_cad, df_est, df_sd2, df_curva, df_kardex, erros_log
 
-with st.spinner("Conectando ao banco de dados e calculando estatísticas em tempo real..."):
+with st.spinner("A ligar ao banco de dados e a calcular estatísticas em tempo real..."):
     df_cad, df_est, df_sd2, df_curva, df_kardex, erros_log = carregar_dados()
 
 if df_est.empty or df_sd2.empty:
