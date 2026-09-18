@@ -51,7 +51,7 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
     # --- MODO INCREMENTAL ---
     modo_upload = "Substituir Tudo"
     if nome_tabela in ["sd2_saidas", "kardex_movimentos"]:
-        st.info(f"💡 Como o {nome_amigavel} costuma ser muito grande, você pode subir apenas a planilha dos dias faltantes. O sistema junta com o histórico e remove duplicidades.")
+        st.info(f"💡 Como o {nome_amigavel} costuma ser muito grande, você pode subir apenas a planilha dos dias faltantes. O sistema identificará apenas as linhas novas.")
         modo_upload = st.radio(
             "Modo de atualização:", 
             ["Adicionar Dias Novos (Incremental)", "Substituir Base Completa (Zerar histórico)"],
@@ -75,7 +75,7 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                             sep = detectar_separador(arquivo_enviado, 'latin1')
                             df = pd.read_csv(arquivo_enviado, dtype=str, encoding='latin1', sep=sep)
                     
-                    # --- RAIO-X DE CABEÇALHOS DO PROTHEUS BLINDADO ---
+                    # Limpeza Inteligente de Cabeçalhos
                     colunas_atuais = " ".join([str(c).upper() for c in df.columns])
                     tem_chave = any(palavra in colunas_atuais for palavra in ["PRODUTO", "CODIGO", "CÓDIGO", "FILIAL"])
                     precisa_ajustar = not tem_chave
@@ -91,18 +91,40 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                     
                     df.columns = deduplicar_colunas(df.columns)
 
+                    # --- NOVA LÓGICA INCREMENTAL (ANTI-JOIN DE ALTA VELOCIDADE) ---
                     if nome_tabela in ["sd2_saidas", "kardex_movimentos"] and "Incremental" in modo_upload:
-                        st.text("🔄 Baixando histórico, mesclando e apagando duplicidades...")
+                        st.text("🔄 Consultando banco de dados para separar apenas linhas inéditas...")
                         try:
                             df_banco = conn.query(f"SELECT * FROM {nome_tabela}", ttl=0).astype(str)
-                            df_final = pd.concat([df_banco, df])
-                            df_final = df_final.drop_duplicates(keep='last')
-                            df_final.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=10000)
-                            st.success(f"✅ Dias novos incorporados ao {nome_amigavel} com sucesso!")
+                            
+                            # Limpeza para garantir comparação perfeita
+                            df_limpo = df.astype(str).apply(lambda x: x.str.strip())
+                            df_banco_limpo = df_banco.apply(lambda x: x.str.strip())
+                            
+                            # Manter apenas colunas que coincidem nas duas tabelas
+                            colunas_comuns = [c for c in df_limpo.columns if c in df_banco_limpo.columns]
+                            
+                            # Remove duplicadas dentro do arquivo recém-subido
+                            df_limpo = df_limpo.drop_duplicates(subset=colunas_comuns)
+                            
+                            # Pulo do gato: Anti-Join para separar O QUE NÃO EXISTE NO BANCO AINDA
+                            df_merge = pd.merge(df_limpo, df_banco_limpo, on=colunas_comuns, how='left', indicator=True)
+                            df_inserir = df_merge[df_merge['_merge'] == 'left_only'].drop(columns=['_merge'])
+                            
+                            if not df_inserir.empty:
+                                st.text(f"🚀 Inserindo {len(df_inserir)} novas linhas identificadas...")
+                                # Usa APPEND ao invés de REPLACE (nunca derruba a tabela, não dá timeout)
+                                df_inserir.to_sql(nome_tabela, con=conn.engine, if_exists='append', index=False, chunksize=5000)
+                                st.success(f"✅ {len(df_inserir)} novas linhas incorporadas ao {nome_amigavel} com sucesso!")
+                            else:
+                                st.success(f"✅ Nenhuma linha nova encontrada. A base já estava totalmente atualizada com os dados deste arquivo!")
+                                
                         except Exception as e:
-                            df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=10000)
+                            # Se a tabela ainda não existe no banco, cria ela pela primeira vez
+                            df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=5000)
                             st.success(f"✅ Primeira carga histórica do {nome_amigavel} criada com sucesso!")
                     else:
+                        # Tabelas normais ou modo Substituição Completa (Apenas bases pequenas ou setup inicial)
                         df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=10000)
                         st.success(f"✅ {nome_amigavel} atualizado com sucesso (Substituição Completa)!")
                         
