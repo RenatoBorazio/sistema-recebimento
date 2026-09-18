@@ -75,12 +75,15 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                             sep = detectar_separador(arquivo_enviado, 'latin1')
                             df = pd.read_csv(arquivo_enviado, dtype=str, encoding='latin1', sep=sep)
                     
-                    precisa_ajustar = any(str(c).lower().startswith('unnamed') or str(c).lower().startswith('sem nome') or str(c).upper() in ['SC7', 'SB1', 'SB2', 'SD1', 'SD2'] for c in df.columns)
+                    # --- RAIO-X DE CABEÇALHOS DO PROTHEUS BLINDADO ---
+                    colunas_atuais = " ".join([str(c).upper() for c in df.columns])
+                    tem_chave = any(palavra in colunas_atuais for palavra in ["PRODUTO", "CODIGO", "CÓDIGO", "FILIAL"])
+                    precisa_ajustar = not tem_chave
                     
                     if precisa_ajustar:
-                        for i in range(min(15, len(df))):
+                        for i in range(min(25, len(df))):
                             linha_atual = " ".join([str(x).upper() for x in df.iloc[i].values])
-                            if "PRODUTO" in linha_atual or "CODIGO" in linha_atual or "CÓDIGO" in linha_atual or "NUMERO" in linha_atual or "FILIAL" in linha_atual:
+                            if "PRODUTO" in linha_atual or "CODIGO" in linha_atual or "CÓDIGO" in linha_atual or "FILIAL" in linha_atual:
                                 df.columns = df.iloc[i]
                                 df = df.iloc[i+1:].reset_index(drop=True)
                                 df = df.loc[:, df.columns.notna()]
