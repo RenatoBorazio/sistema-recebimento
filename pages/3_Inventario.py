@@ -11,7 +11,7 @@ st.title("📋 Módulo de Inventário")
 st.markdown("Cruze Contagens, Apure Divergências e Gerencie os Resultados Consolidados por Período.")
 
 # --- CONEXÃO COM O BANCO DE DADOS NA NUVEM ---
-conn = st.connection("supabase", type="sql")
+conn = st.connection("supabase", type="sql", connect_args={"prepare_threshold": None})
 
 def salvar_historico_nuvem(df):
     try:
