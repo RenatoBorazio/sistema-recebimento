@@ -12,7 +12,7 @@ st.title("🧾 Módulo de Recebimento")
 st.markdown("Auditoria de NFs, Distribuição Inteligente e Validação Final de Importação Protheus (Cloud).")
 
 # --- CONEXÃO COM O BANCO DE DADOS NA NUVEM ---
-conn = st.connection("supabase", type="sql")
+conn = st.connection("supabase", type="sql", connect_args={"prepare_threshold": None})
 
 def salvar_recebimentos_nuvem(df):
     try:
