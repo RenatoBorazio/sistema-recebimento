@@ -12,7 +12,7 @@ st.title("🧾 Módulo de Recebimento")
 st.markdown("Auditoria de NFs, Distribuição Inteligente e Validação Final de Importação Protheus (Cloud).")
 
 # --- CONEXÃO COM O BANCO DE DADOS NA NUVEM ---
-conn = st.connection("supabase", type="sql")
+conn = st.connection("supabase", type="sql", connect_args={"prepare_threshold": None})
 
 def salvar_recebimentos_nuvem(df):
     try:
@@ -754,7 +754,7 @@ if not df_recebimentos.empty:
                                 texto_padrao += f"PC {pc_str}\n\n"
                                 
                                 if not df_ruptura.empty:
-                                    texto_padrao += "🚨 ATENÇÃO - PRODUTOS COM RUPTURA DE ESTOQUE ZERO:\n"
+                                    texto_padrao += "🚨 ATENÇÃO - PRODUTOS COM RUPTURA DE ESTOQUE:\n"
                                     for _, r_row in df_ruptura.iterrows():
                                         c_int = r_row.get('Código Interno', 'Sem Cód')
                                         desc = r_row.get('Produto (SB1)', r_row.get('Produto', ''))
