@@ -19,9 +19,10 @@ def salvar_recebimentos_nuvem(df):
         with conn.session as s:
             s.execute(text("DELETE FROM recebimentos_xml"))
             s.commit()
-        df.to_sql("recebimentos_xml", con=conn.engine, if_exists='append', index=False)
+        # O preenchimento .fillna(0) garante que nenhum 'None' quebre a base de dados
+        df.fillna(0).to_sql("recebimentos_xml", con=conn.engine, if_exists='append', index=False)
     except:
-        df.to_sql("recebimentos_xml", con=conn.engine, if_exists='replace', index=False)
+        df.fillna(0).to_sql("recebimentos_xml", con=conn.engine, if_exists='replace', index=False)
 
 def limpar_zeros_pedido(ped):
     p = str(ped).strip()
@@ -467,7 +468,15 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                     linhas_a_remover.append(real_idx)
                 continue
             
+            # --- CORREÇÃO DA LEITURA DO 'nan' FANTASMA ---
             ped_item_str = str(row.get('Pedido (Item)', '')).strip()
+            if ped_item_str.lower() in ['nan', 'none', '']: 
+                ped_item_str = ""
+            
+            ped_nf_str = str(ped_nf_str).strip()
+            if ped_nf_str.lower() in ['nan', 'none', '']: 
+                ped_nf_str = ""
+            # ---------------------------------------------
             
             peds_multiplos = []
             if ',' in ped_item_str: peds_multiplos = [limpar_zeros_pedido(p) for p in ped_item_str.split(',') if p.strip()]
@@ -600,7 +609,7 @@ with st.sidebar:
 
     st.divider()
     st.header("⚙️ Administração")
-    if st.button("🗑️ Limpar Notas Pendentes"):
+    if st.button("🗑️️ Limpar Notas Pendentes"):
         try:
             df_temp = conn.query("SELECT * FROM recebimentos_xml", ttl=0)
             if not df_temp.empty:
@@ -670,7 +679,8 @@ if not df_recebimentos.empty:
                         with st.form(key=f"form_nf_{filial}_{nf}"):
                             col1, col2 = st.columns([2, 2])
                             with col1:
-                                novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual)
+                                # A Chave de Segurança (key) foi adicionada aqui
+                                novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual, key=f"ped_master_{filial}_{nf}")
                             
                             cols_view = [
                                 "Excluir", "Duplicar", "Devolução", "Ação / Decisão", "Linha", "EAN", "UM", "Código Interno", "Avisos", "Curva ABC", "Ruptura", "Pedido Considerado",
