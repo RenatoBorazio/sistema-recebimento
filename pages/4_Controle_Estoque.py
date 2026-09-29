@@ -10,7 +10,7 @@ st.title("📉 Previsão de Ruptura e Venda Perdida")
 st.markdown("Projete a cobertura do estoque, analise furos operacionais e calcule o prejuízo de rupturas passadas.")
 
 # --- CONEXÃO COM O BANCO DE DADOS NA NUVEM ---
-conn = st.connection("supabase", type="sql")
+conn = st.connection("supabase", type="sql", connect_args={"prepare_threshold": None})
 
 def safe_numeric(series):
     s = series.astype(str).str.strip()
