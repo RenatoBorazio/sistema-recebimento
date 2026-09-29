@@ -8,7 +8,7 @@ st.title("⚙️ Central de Bases (Nuvem)")
 st.markdown("Faça o upload dos relatórios do Protheus. Eles serão atualizados em tempo real no banco de dados corporativo para toda a equipe.")
 
 # 1. Conectando ao Banco de Dados 
-conn = st.connection("supabase", type="sql")
+conn = st.connection("supabase", type="sql", connect_args={"prepare_threshold": None})
 
 # 2. Mapeamento das bases
 bases_esperadas = {
