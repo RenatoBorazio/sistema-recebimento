@@ -1,14 +1,46 @@
 import streamlit as st
 import pandas as pd
+import io
 from sqlalchemy import text
 
 st.set_page_config(page_title="Central de Bases - Protheus", layout="wide")
 
 st.title("⚙️ Central de Bases (Nuvem)")
-st.markdown("Faça o upload dos relatórios do Protheus. Eles serão atualizados em tempo real no banco de dados corporativo para toda a equipe.")
+st.markdown("Faça o upload dos relatórios do Protheus. Eles serão atualizados em tempo real no banco de dados corporativo para toda a equipa.")
 
-# 1. Conectando ao Banco de Dados 
+# 1. Ligação à Base de Dados (Com a correção de cache de memória ativada)
 conn = st.connection("supabase", type="sql", connect_args={"prepare_threshold": None})
+
+# --- SISTEMA DE REGISTO DE DATAS (LOGS) ---
+# Tenta criar a tabela de logs na base de dados se ela não existir
+try:
+    with conn.session as s:
+        s.execute(text("CREATE TABLE IF NOT EXISTS controle_atualizacoes (nome_tabela VARCHAR(255), ultima_atualizacao TIMESTAMP);"))
+        s.commit()
+except:
+    pass # Ignora de forma silenciosa falhas na criação inicial
+
+# Carregar o dicionário com as datas da última atualização de cada tabela
+try:
+    df_logs = conn.query("SELECT * FROM controle_atualizacoes", ttl=0)
+    logs_dict = dict(zip(df_logs['nome_tabela'], df_logs['ultima_atualizacao']))
+except:
+    logs_dict = {}
+
+def registar_data_atualizacao(nome_tabela):
+    """Grava o momento exato em que a tabela foi atualizada com sucesso, no fuso horário do Brasil."""
+    agora_br = pd.Timestamp.now(tz='America/Sao_Paulo').strftime('%Y-%m-%d %H:%M:%S')
+    sql_delete = f"DELETE FROM controle_atualizacoes WHERE nome_tabela = '{nome_tabela}';"
+    sql_insert = f"INSERT INTO controle_atualizacoes (nome_tabela, ultima_atualizacao) VALUES ('{nome_tabela}', '{agora_br}');"
+    try:
+        with conn.session as s:
+            s.execute(text(sql_delete))
+            s.execute(text(sql_insert))
+            s.commit()
+    except Exception as e:
+        print(f"Erro ao gravar log: {e}")
+
+# --- FIM DO SISTEMA DE REGISTO ---
 
 # 2. Mapeamento das bases
 bases_esperadas = {
@@ -27,11 +59,9 @@ def carregar_dataframe(arquivo_enviado):
     if arquivo_enviado.name.lower().endswith('.xlsx'):
         return pd.read_excel(arquivo_enviado, dtype=str)
     
-    # Para CSV e TXT do Protheus
     arquivo_enviado.seek(0)
     bytes_data = arquivo_enviado.read()
     
-    # Descobre o Encoding (utf-8 ou latin1)
     encoding = 'utf-8'
     try:
         bytes_data.decode('utf-8')
@@ -40,11 +70,9 @@ def carregar_dataframe(arquivo_enviado):
         
     linhas = bytes_data.split(b'\n')
     
-    # Detecta o separador correto
     amostra = b"".join(linhas[:10]).decode(encoding, errors='ignore')
     sep = ';' if amostra.count(';') >= amostra.count(',') else ','
     
-    # Identifica a linha onde as colunas de verdade começam
     skip_idx = 0
     for i, l in enumerate(linhas):
         if l.decode(encoding, errors='ignore').count(sep) >= 3:
@@ -73,6 +101,19 @@ st.divider()
 for nome_amigavel, nome_tabela in bases_esperadas.items():
     st.subheader(f"Atualizar {nome_amigavel}")
     
+    # --- APRESENTAR A DATA DA ÚLTIMA ATUALIZAÇÃO ---
+    ultima_data_raw = logs_dict.get(nome_tabela)
+    if pd.notna(ultima_data_raw) and ultima_data_raw:
+        try:
+            dt = pd.to_datetime(ultima_data_raw)
+            ultima_data_str = dt.strftime('%d/%m/%Y às %H:%M')
+            st.caption(f"✅ **Última atualização:** {ultima_data_str}")
+        except:
+            st.caption("⚠️ **Última atualização:** Data em formato desconhecido")
+    else:
+        st.caption("⚠️ **Última atualização:** Base ainda não enviada (Sem registo)")
+    # -----------------------------------------------
+
     # --- MODO INCREMENTAL ---
     modo_upload = "Substituir Tudo"
     if nome_tabela in ["sd2_saidas", "kardex_movimentos"]:
@@ -111,15 +152,12 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                         st.text("🚀 A alinhar colunas e a injetar os novos dados na nuvem...")
                         
                         try:
-                            # 1. Puxa as colunas oficiais da base de dados (sem baixar as linhas)
                             df_cols_banco = conn.query(f"SELECT * FROM {nome_tabela} LIMIT 0", ttl=0)
                             colunas_no_banco = df_cols_banco.columns.tolist()
 
-                            # 2. Filtra o ficheiro carregado para enviar APENAS as colunas que existem na base
                             colunas_em_comum = [c for c in df.columns if c in colunas_no_banco]
                             df_alinhado = df[colunas_em_comum]
 
-                            # 3. Faz o append seguro apenas com os dados filtrados
                             df_alinhado.to_sql(nome_tabela, con=conn.engine, if_exists='append', index=False, chunksize=5000)
 
                             st.text("🧹 A remover dados duplicados diretamente no servidor...")
@@ -137,16 +175,18 @@ for nome_amigavel, nome_tabela in bases_esperadas.items():
                             with conn.session as s:
                                 s.execute(text(sql_dedup))
                                 s.commit()
-
+                            
+                            registar_data_atualizacao(nome_tabela)
                             st.success(f"✅ Ficheiro incorporado e duplicidades removidas com sucesso na nuvem!")
                             
                         except Exception as e:
-                            # Se a tabela ainda não existir na nuvem, cria a base do zero
                             df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=10000)
+                            registar_data_atualizacao(nome_tabela)
                             st.success(f"✅ Primeira carga histórica do {nome_amigavel} criada com sucesso!")
                         
                     else:
                         df.to_sql(nome_tabela, con=conn.engine, if_exists='replace', index=False, chunksize=10000)
+                        registar_data_atualizacao(nome_tabela)
                         st.success(f"✅ {nome_amigavel} atualizado com sucesso (Substituição Completa)!")
                         
                 except Exception as e:
