@@ -440,9 +440,9 @@ with aba1:
                             df_export_rec.to_excel(writer, sheet_name=f"Recontagem", index=False)
                         
                         st.download_button(
-                            f"🔄 Baixar Recontagem do Lote", 
+                            f"🔄 Baixar Recontagem ({filial})", 
                             data=output_rec.getvalue(), 
-                            file_name=f"Recontagem_{lote}.xlsx", 
+                            file_name=f"{filial}_Recontagem_{lote}.xlsx", 
                             type="secondary",
                             use_container_width=True,
                             key=f"btn_rec_{lote}"
@@ -463,9 +463,9 @@ with aba1:
                         df_protheus.to_csv(output_prot, sep=';', index=False, encoding='utf-8-sig')
                         
                         st.download_button(
-                            f"🔌 Baixar Arquivo PROTHEUS do Lote", 
+                            f"🔌 Baixar Arquivo PROTHEUS ({filial})", 
                             data=output_prot.getvalue().encode('utf-8-sig'), 
-                            file_name=f"IMPORTACAO_{lote}.csv", 
+                            file_name=f"{filial}_IMPORTACAO_{lote}.csv", 
                             type="primary",
                             use_container_width=True,
                             key=f"btn_prot_{lote}"
