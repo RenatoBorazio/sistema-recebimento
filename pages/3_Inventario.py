@@ -13,37 +13,60 @@ st.markdown("Cruze Contagens, Apure Divergências e Gerencie os Resultados Conso
 # --- CONEXÃO COM O BANCO DE DADOS NA NUVEM ---
 conn = st.connection("supabase", type="sql", connect_args={"prepare_threshold": None})
 
-def salvar_historico_nuvem(df):
+# --- NOVAS FUNÇÕES DE GRAVAÇÃO (BLINDADAS CONTRA CRASHES) ---
+def gravar_historico_seguro(df_salvar, periodo, data, filial, lote):
+    """Grava o histórico usando APPEND direto. Nunca apaga a tabela inteira."""
     try:
+        sql_delete = f"""
+            DELETE FROM historico_inventario 
+            WHERE "PERIODO" = '{periodo}' AND "DATA" = '{data}' AND "FILIAL" = '{filial}' AND "ID_CONTAGEM" = '{lote}'
+        """
         with conn.session as s:
-            s.execute(text("DELETE FROM historico_inventario"))
+            s.execute(text(sql_delete))
             s.commit()
-        df.to_sql("historico_inventario", con=conn.engine, if_exists='append', index=False)
     except:
-        df.to_sql("historico_inventario", con=conn.engine, if_exists='replace', index=False)
+        pass 
 
-def salvar_pendentes_nuvem(df):
+    df_salvar.to_sql("historico_inventario", con=conn.engine, if_exists='append', index=False)
+
+def estornar_historico_seguro(periodo, data, filial, lote):
+    """Remove especificamente um lote do histórico usando SQL nativo."""
+    sql_delete = f"""
+        DELETE FROM historico_inventario 
+        WHERE "PERIODO" = '{periodo}' AND "DATA" = '{data}' AND "FILIAL" = '{filial}' AND "ID_CONTAGEM" = '{lote}'
+    """
+    with conn.session as s:
+        s.execute(text(sql_delete))
+        s.commit()
+
+def salvar_pendentes_seguro(df_novo, lote):
+    """Grava os pendentes de um lote específico sem afetar os outros."""
+    try:
+        sql_delete = f"""DELETE FROM inventario_pendente WHERE "ID_CONTAGEM" = '{lote}'"""
+        with conn.session as s:
+            s.execute(text(sql_delete))
+            s.commit()
+    except:
+        pass
+        
+    if not df_novo.empty:
+        df_novo.to_sql("inventario_pendente", con=conn.engine, if_exists='append', index=False)
+
+def limpar_pendentes_geral():
     try:
         with conn.session as s:
             s.execute(text("DELETE FROM inventario_pendente"))
             s.commit()
-        if not df.empty:
-            df.to_sql("inventario_pendente", con=conn.engine, if_exists='append', index=False)
     except:
-        if not df.empty:
-            df.to_sql("inventario_pendente", con=conn.engine, if_exists='replace', index=False)
+        pass
 
 def carregar_pendentes():
-    try:
-        return conn.query("SELECT * FROM inventario_pendente", ttl=0)
-    except:
-        return pd.DataFrame()
+    try: return conn.query("SELECT * FROM inventario_pendente", ttl=0)
+    except: return pd.DataFrame()
 
 def carregar_historico():
-    try:
-        return conn.query("SELECT * FROM historico_inventario", ttl=0)
-    except:
-        return pd.DataFrame()
+    try: return conn.query("SELECT * FROM historico_inventario", ttl=0)
+    except: return pd.DataFrame()
 
 def obter_primeira_coluna(df, nomes_possiveis):
     for nome in nomes_possiveis:
@@ -72,21 +95,18 @@ try:
         df_cad['CUSTO STAND'] = safe_numeric(df_cad_raw[c_custo_st]) if c_custo_st else 0.0
     else:
         df_cad = pd.DataFrame()
-except:
-    df_cad = pd.DataFrame()
+except: df_cad = pd.DataFrame()
 
 try:
     df_barras = conn.query("SELECT * FROM barras_adicionais", ttl=0).astype(str)
     if not df_barras.empty:
         if 'EAN' in df_barras.columns: df_barras['EAN'] = df_barras['EAN'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-except:
-    df_barras = pd.DataFrame()
+except: df_barras = pd.DataFrame()
 
 try:
     df_est_raw = conn.query("SELECT * FROM estoque_inicial", ttl=0).astype(str)
     if not df_est_raw.empty:
         df_est_raw.columns = [str(c).upper().strip() for c in df_est_raw.columns]
-        
         c_filial = obter_primeira_coluna(df_est_raw, ['FILIAL', 'B2_FILIAL', 'B7_FILIAL', 'COD FILIAL', 'CÓDIGO FILIAL'])
         c_prod = obter_primeira_coluna(df_est_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'B2_COD', 'B7_COD', 'ITEM', 'COD. PRODUTO'])
         c_arm = obter_primeira_coluna(df_est_raw, ['ARMAZEM', 'ARMAZÉM', 'LOCAL', 'B2_LOCAL', 'B7_LOCAL', 'DEPOSITO', 'DEPÓSITO'])
@@ -99,10 +119,8 @@ try:
         df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
         df_est['Saldo Inicial'] = safe_numeric(df_est_raw[c_saldo]) if c_saldo else 0.0
         df_est['Custo Unitario'] = safe_numeric(df_est_raw[c_custo]) if c_custo else 0.0
-    else:
-        df_est = pd.DataFrame()
-except:
-    df_est = pd.DataFrame()
+    else: df_est = pd.DataFrame()
+except: df_est = pd.DataFrame()
 
 try:
     df_sd1_raw = conn.query("SELECT * FROM sd1_pendente", ttl=0).astype(str)
@@ -110,14 +128,11 @@ try:
         df_sd1_raw.columns = [str(c).upper().strip() for c in df_sd1_raw.columns]
         c_filial_sd1 = obter_primeira_coluna(df_sd1_raw, ['FILIAL', 'D1_FILIAL'])
         c_prod_sd1 = obter_primeira_coluna(df_sd1_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'D1_COD'])
-        
         df_sd1 = pd.DataFrame()
         df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
         df_sd1['Produto'] = df_sd1_raw[c_prod_sd1].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod_sd1 else ""
-    else:
-        df_sd1 = pd.DataFrame()
-except:
-    df_sd1 = pd.DataFrame()
+    else: df_sd1 = pd.DataFrame()
+except: df_sd1 = pd.DataFrame()
 
 try:
     df_curva_raw = conn.query("SELECT * FROM base_curva_abc", ttl=0).astype(str)
@@ -126,19 +141,14 @@ try:
         c_cod_curva = obter_primeira_coluna(df_curva_raw, ['CODIGO', 'CÓDIGO', 'PRODUTO', 'CÓDIGO INTERNO'])
         c_curva = obter_primeira_coluna(df_curva_raw, ['CURVA', 'CURVA ABC'])
         c_filial_curva = obter_primeira_coluna(df_curva_raw, ['FILIAL', 'LOJA'])
-        
         df_curva = pd.DataFrame()
         if c_cod_curva and c_curva:
             df_curva['CODIGO'] = df_curva_raw[c_cod_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip()
             df_curva['CURVA'] = df_curva_raw[c_curva].astype(str).str.strip().str.upper()
-            if c_filial_curva:
-                df_curva['FILIAL'] = df_curva_raw[c_filial_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip()
-            else:
-                df_curva['FILIAL'] = ""
-    else:
-        df_curva = pd.DataFrame()
-except:
-    df_curva = pd.DataFrame()
+            if c_filial_curva: df_curva['FILIAL'] = df_curva_raw[c_filial_curva].astype(str).replace(r'\.0$', '', regex=True).str.strip()
+            else: df_curva['FILIAL'] = ""
+    else: df_curva = pd.DataFrame()
+except: df_curva = pd.DataFrame()
 
 def checar_bases():
     faltantes = []
@@ -147,13 +157,12 @@ def checar_bases():
     return faltantes
 
 if checar_bases():
-    st.warning(f"⚠️ Cofre incompleto para Inventário. Vá na Central de Bases e sincronize: {', '.join(checar_bases())}")
+    st.warning(f"⚠️️ Cofre incompleto para Inventário. Vá na Central de Bases e sincronize: {', '.join(checar_bases())}")
     st.stop()
 
 def padronizar_colunas(df_bruto, nome_coluna_alvo):
     df = df_bruto.copy()
     colunas_upper = {str(c).upper().strip(): c for c in df.columns}
-    
     def obter_chave(nomes_possiveis):
         for nome in nomes_possiveis:
             if nome in colunas_upper: return colunas_upper[nome]
@@ -169,7 +178,6 @@ def padronizar_colunas(df_bruto, nome_coluna_alvo):
         if col_armazem: cols_extract.append(col_armazem)
             
         df_ret = df[cols_extract].copy()
-        
         renames = {col_filial: 'Filial', col_prod: 'INFORMAR CODIGO', col_cont: nome_coluna_alvo}
         if col_armazem: renames[col_armazem] = 'ARMAZEM'
             
@@ -294,9 +302,7 @@ def processar_contagem(df_contagem):
                 custo_unitario = float(m_cad_custo['CUSTO STAND'].iloc[0])
             
         valor_inicial = saldo_inicial * custo_unitario
-        
         divergencia_c1 = contagem_1 - saldo_inicial
-        
         divergencia_saldo = contagem_final - saldo_inicial
         divergencia_valor = divergencia_saldo * custo_unitario
         
@@ -344,20 +350,36 @@ with st.sidebar:
                 if not df_c1.empty:
                     lote_final = nome_lote_input.strip() if nome_lote_input.strip() else f"Lote {datetime.datetime.now().strftime('%H:%M:%S')}"
                     df_c1['ID_CONTAGEM'] = lote_final
-                    
-                    df_pend = carregar_pendentes()
-                    if not df_pend.empty and 'ID_CONTAGEM' not in df_pend.columns:
-                        df_pend['ID_CONTAGEM'] = "Lote Legado"
-                        
-                    df_novo = pd.concat([df_pend, df_c1]).drop_duplicates(subset=['ID_CONTAGEM', 'Filial', 'ARMAZEM', 'INFORMAR CODIGO'], keep='last')
-                    salvar_pendentes_nuvem(df_novo)
+                    salvar_pendentes_seguro(df_c1, lote_final)
                     st.success("Salvo na nuvem com sucesso!")
                     st.rerun()
 
     st.divider()
     st.header("⚙️ Administração")
-    if st.button("🗑️ Limpar Todas as Contagens Pendentes"):
-        salvar_pendentes_nuvem(pd.DataFrame())
+    
+    with st.expander("🧹 Limpeza de Base (Memória)"):
+        st.write("Apague o histórico de inventários antigos para libertar espaço na nuvem.")
+        
+        df_hist_check = carregar_historico()
+        if not df_hist_check.empty:
+            periodos_disp = sorted(df_hist_check['PERIODO'].astype(str).unique())
+            per_apagar = st.selectbox("Selecione o Período para apagar:", options=periodos_disp)
+            
+            if st.button(f"🗑️ Apagar Histórico do {per_apagar}", type="primary", use_container_width=True):
+                sql_del = f"DELETE FROM historico_inventario WHERE \"PERIODO\" = '{per_apagar}'"
+                try:
+                    with conn.session as s:
+                        s.execute(text(sql_del))
+                        s.commit()
+                    st.success(f"Histórico do período {per_apagar} apagado com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao limpar: {e}")
+        else:
+            st.info("O histórico de inventário está vazio.")
+
+    if st.button("🗑️ Limpar Todas as Contagens Pendentes", use_container_width=True):
+        limpar_pendentes_geral()
         st.success("Contagens pendentes limpas.")
         st.rerun()
 
@@ -373,7 +395,6 @@ with aba1:
             df_pendentes['ID_CONTAGEM'] = "Lote Legado"
             
         lotes_pendentes = sorted(df_pendentes['ID_CONTAGEM'].astype(str).unique())
-        
         lista_res_filiais = []
         
         for lote in lotes_pendentes:
@@ -383,12 +404,13 @@ with aba1:
             st.subheader(f"📦 Lote: {lote} | 🏢 Filial: {filial}")
             
             with st.expander(f"⚙️ Apuração Pendente ({len(df_lote_c1)} itens na 1ª Contagem)", expanded=True):
-                
                 col_del, _ = st.columns([2, 8])
                 with col_del:
                     if st.button(f"🗑️ Excluir Contagem", key=f"del_c1_{lote}"):
-                        df_pend_new = df_pendentes[df_pendentes['ID_CONTAGEM'] != lote]
-                        salvar_pendentes_nuvem(df_pend_new)
+                        sql_del = f"DELETE FROM inventario_pendente WHERE \"ID_CONTAGEM\" = '{lote}'"
+                        with conn.session as s:
+                            s.execute(text(sql_del))
+                            s.commit()
                         st.rerun()
                 
                 st.markdown("#### 1. Importar Recontagem (Opcional)")
@@ -409,7 +431,6 @@ with aba1:
                 
                 div_rs = df_res['DIVERGENCIA DE VALOR'].sum()
                 div_pcs = df_res['DIVERGENCIA DE SALDO'].sum()
-                
                 st.markdown(f"**Resultado Atual:** Divergência de R$ {div_rs:,.2f} ({div_pcs} un)")
                 
                 df_view = df_res.copy()
@@ -418,7 +439,6 @@ with aba1:
                 st.dataframe(df_view.drop(columns=['EAN OFICIAL (SB1)', 'FILIAL', 'ID_CONTAGEM']), use_container_width=True, hide_index=True)
                 
                 df_recontagem = df_res[(df_res['DIVERGENCIA DE SALDO'] != 0) & (df_res['DISPONIVEL PARA INVENTARIO?'] == 'SIM')].copy()
-                
                 col_btn1, col_btn2 = st.columns([1, 1])
                 with col_btn1:
                     if not df_recontagem.empty:
@@ -438,17 +458,15 @@ with aba1:
                         output_rec = io.BytesIO()
                         with pd.ExcelWriter(output_rec, engine='openpyxl') as writer:
                             df_export_rec.to_excel(writer, sheet_name=f"Recontagem", index=False)
-                        
                         st.download_button(
-                            f"🔄 Baixar Recontagem ({filial})", 
+                            f"🔄 Baixar Recontagem do Lote", 
                             data=output_rec.getvalue(), 
                             file_name=f"{filial}_Recontagem_{lote}.xlsx", 
                             type="secondary",
                             use_container_width=True,
                             key=f"btn_rec_{lote}"
                         )
-                    else:
-                        st.success("🎉 Não há divergências! Nenhuma recontagem necessária.")
+                    else: st.success("🎉 Não há divergências! Nenhuma recontagem necessária.")
                         
                 with col_btn2:
                     df_protheus_source = df_res[(df_res['DISPONIVEL PARA INVENTARIO?'] == 'SIM') & (df_res['DIVERGENCIA DE SALDO'] != 0)]
@@ -461,55 +479,41 @@ with aba1:
                         })
                         output_prot = io.StringIO()
                         df_protheus.to_csv(output_prot, sep=';', index=False, encoding='utf-8-sig')
-                        
                         st.download_button(
-                            f"🔌 Baixar Arquivo PROTHEUS ({filial})", 
+                            f"🔌 Baixar Arquivo PROTHEUS do Lote", 
                             data=output_prot.getvalue().encode('utf-8-sig'), 
                             file_name=f"{filial}_IMPORTACAO_{lote}.csv", 
                             type="primary",
                             use_container_width=True,
                             key=f"btn_prot_{lote}"
                         )
-                    else:
-                        st.success("🟢 100% Batido! Nenhuma exportação necessária.")
+                    else: st.success("🟢 100% Batido! Nenhuma exportação necessária.")
                 
                 st.markdown("---")
                 st.markdown("#### 2. Finalizar e Gravar no Histórico")
                 with st.form(key=f"form_fin_{lote}"):
                     c_p1, c_p2 = st.columns(2)
-                    with c_p1:
-                        per_input = st.text_input("Período (Ex: P9):", value="P9", key=f"per_{lote}")
-                    with c_p2:
-                        dt_input = st.date_input("Data do Inventário:", value=datetime.date.today(), key=f"dt_{lote}")
+                    with c_p1: per_input = st.text_input("Período (Ex: P9):", value="P9", key=f"per_{lote}")
+                    with c_p2: dt_input = st.date_input("Data do Inventário:", value=datetime.date.today(), key=f"dt_{lote}")
                         
                     btn_fin = st.form_submit_button("✅ Gravar Oficialmente e Encerrar", type="primary", use_container_width=True)
                     if btn_fin:
-                        df_hist = carregar_historico()
                         df_salvar = df_res.copy()
                         df_salvar['DATA'] = str(dt_input)
                         df_salvar.insert(0, 'PERIODO', str(per_input))
                         
-                        if not df_hist.empty:
-                            if 'ID_CONTAGEM' not in df_hist.columns:
-                                df_hist['ID_CONTAGEM'] = "Lote Legado"
-                            df_hist = df_hist[~((df_hist['PERIODO'].astype(str) == str(per_input)) & 
-                                                (df_hist['DATA'].astype(str) == str(dt_input)) & 
-                                                (df_hist['FILIAL'].astype(str) == filial) &
-                                                (df_hist['ID_CONTAGEM'].astype(str) == lote))]
-                                                
-                        df_hist_novo = pd.concat([df_hist, df_salvar], ignore_index=True)
-                        salvar_historico_nuvem(df_hist_novo)
+                        gravar_historico_seguro(df_salvar, str(per_input), str(dt_input), filial, lote)
                         
-                        df_pend_new = df_pendentes[df_pendentes['ID_CONTAGEM'] != lote]
-                        salvar_pendentes_nuvem(df_pend_new)
-                        
+                        sql_del = f"DELETE FROM inventario_pendente WHERE \"ID_CONTAGEM\" = '{lote}'"
+                        with conn.session as s:
+                            s.execute(text(sql_del))
+                            s.commit()
+                            
                         st.success(f"Lote '{lote}' gravado com sucesso no Histórico!")
                         st.rerun()
 
-        if lista_res_filiais:
-            df_res_pendentes_global = pd.concat(lista_res_filiais, ignore_index=True)
-    else:
-        st.info("Nenhuma contagem em andamento. Inicie fazendo o upload da 1ª contagem no menu lateral.")
+        if lista_res_filiais: df_res_pendentes_global = pd.concat(lista_res_filiais, ignore_index=True)
+    else: st.info("Nenhuma contagem em andamento. Inicie fazendo o upload da 1ª contagem no menu lateral.")
 
 # --- ABA 2: RESULTADOS GERENCIAIS (SEMPRE FIXA) ---
 with aba2:
@@ -517,38 +521,25 @@ with aba2:
     
     if not df_hist.empty:
         st.markdown("### 📈 Painel Consolidado de Inventários")
-        
         periodos_disp = sorted(df_hist['PERIODO'].astype(str).unique())
         
         col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            per_selecionado = st.selectbox("Selecione o Período:", options=periodos_disp, index=len(periodos_disp)-1)
-        with col_f2:
-            visao = st.radio("Selecione a Visão:", options=["Visão Consolidada (Total do Período)", "Visão Detalhada (Por Dia/Filial/Lote)"], horizontal=True)
+        with col_f1: per_selecionado = st.selectbox("Selecione o Período:", options=periodos_disp, index=len(periodos_disp)-1)
+        with col_f2: visao = st.radio("Selecione a Visão:", options=["Visão Consolidada (Total do Período)", "Visão Detalhada (Por Dia/Filial/Lote)"], horizontal=True)
             
         st.divider()
-        
         df_filtro = df_hist[(df_hist['PERIODO'].astype(str) == str(per_selecionado)) & (df_hist['DISPONIVEL PARA INVENTARIO?'].astype(str) == 'SIM')].copy()
         
         if not df_filtro.empty:
-            if 'ID_CONTAGEM' not in df_filtro.columns:
-                df_filtro['ID_CONTAGEM'] = "Lote Legado"
+            if 'ID_CONTAGEM' not in df_filtro.columns: df_filtro['ID_CONTAGEM'] = "Lote Legado"
                 
             if "Detalhada" in visao:
                 datas_unicas = sorted(df_filtro['DATA'].astype(str).unique())
                 def formatar_data_br(d_str):
-                    try:
-                        return datetime.datetime.strptime(d_str, '%Y-%m-%d').strftime('%d/%m/%Y')
+                    try: return datetime.datetime.strptime(d_str, '%Y-%m-%d').strftime('%d/%m/%Y')
                     except: return d_str
                 mapa_datas = {d: formatar_data_br(d) for d in datas_unicas}
-                
-                datas_selecionadas = st.multiselect(
-                    "📅 Filtrar por Data(s) Específica(s):",
-                    options=datas_unicas,
-                    default=datas_unicas,
-                    format_func=lambda x: mapa_datas[x]
-                )
-                
+                datas_selecionadas = st.multiselect("📅 Filtrar por Data(s):", options=datas_unicas, default=datas_unicas, format_func=lambda x: mapa_datas[x])
                 df_filtro = df_filtro[df_filtro['DATA'].astype(str).isin(datas_selecionadas)]
                 st.markdown("---")
 
@@ -571,19 +562,15 @@ with aba2:
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
                     df_detalhe = df_filtro.groupby(['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO'], as_index=False).agg({
-                        'SALDO INICIAL': 'sum',
-                        'CONTAGEM FINAL': 'sum',
-                        'DIVERGENCIA DE SALDO': 'sum',
-                        'VALOR INICIAL': 'sum',
-                        'DIVERGENCIA DE VALOR': 'sum'
+                        'SALDO INICIAL': 'sum', 'CONTAGEM FINAL': 'sum', 'DIVERGENCIA DE SALDO': 'sum',
+                        'VALOR INICIAL': 'sum', 'DIVERGENCIA DE VALOR': 'sum'
                     })
                 else:
                     for (data, filial), group in df_filtro.groupby(['DATA', 'FILIAL']):
                         try: data_formatada = datetime.datetime.strptime(str(data), '%Y-%m-%d').strftime('%d/%m/%Y')
                         except: data_formatada = str(data)
                         resumo_gerencial.append({
-                            "DATA DA CONTAGEM": data_formatada,
-                            "RESULTADOS INVENTÁRIO": filial,
+                            "DATA DA CONTAGEM": data_formatada, "RESULTADOS INVENTÁRIO": filial,
                             "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
@@ -630,35 +617,25 @@ with aba2:
                 st.markdown("---")
                 with st.expander("⚠️ Zona de Perigo: Estornar / Excluir Inventário Salvo"):
                     st.write("Use esta opção caso tenha gravado uma contagem errada e precise apagá-la do histórico.")
-                    
                     df_opcoes = df_filtro[['DATA', 'FILIAL', 'ID_CONTAGEM']].drop_duplicates()
                     lista_estorno = [f"{r['DATA']} | Filial {r['FILIAL']} | Lote: {r['ID_CONTAGEM']}" for _, r in df_opcoes.iterrows()]
                     selecao_estorno = st.multiselect(f"Selecione os inventários do {per_selecionado} que deseja estornar:", options=lista_estorno)
                     
-                    if st.button("🗑️ Estornar Inventários Selecionados", type="primary"):
+                    if st.button("🗑 Estornar Inventários Selecionados", type="primary"):
                         if selecao_estorno:
-                            df_hist_full = carregar_historico()
                             for item in selecao_estorno:
                                 partes = item.split(" | ")
                                 d_str = partes[0].strip()
                                 f_str = partes[1].replace("Filial ", "").strip()
                                 l_str = partes[2].replace("Lote: ", "").strip()
-                                
-                                df_hist_full = df_hist_full[~((df_hist_full['PERIODO'].astype(str) == str(per_selecionado)) & 
-                                                              (df_hist_full['DATA'].astype(str) == d_str) & 
-                                                              (df_hist_full['FILIAL'].astype(str) == f_str) &
-                                                              (df_hist_full['ID_CONTAGEM'].astype(str) == l_str))]
-                            salvar_historico_nuvem(df_hist_full)
+                                estornar_historico_seguro(str(per_selecionado), d_str, f_str, l_str)
                             st.success("Lote(s) estornado(s) com sucesso!")
                             st.rerun()
                         else:
                             st.warning("Selecione pelo menos um item acima para estornar.")
-            else:
-                st.warning("⚠️ Nenhuma data selecionada.")
-        else:
-            st.info(f"Nenhum dado válido gravado para o período {per_selecionado}.")
-    else:
-        st.info("O Histórico de Inventário está vazio. Faça uma apuração e grave os resultados para visualizar o painel.")
+            else: st.warning("⚠️ Nenhuma data selecionada.")
+        else: st.info(f"Nenhum dado válido gravado para o período {per_selecionado}.")
+    else: st.info("O Histórico de Inventário está vazio. Faça uma apuração e grave os resultados para visualizar o painel.")
 
 # --- ABA 3: CALENDÁRIO SEMANAL DE REPORT ---
 with aba3:
@@ -675,8 +652,7 @@ with aba3:
         dates = [data_inicio + datetime.timedelta(days=i) for i in range((data_fim - data_inicio).days + 1)]
         if ignorar_fds: dates = [d for d in dates if d.weekday() < 5]
             
-        if not dates:
-            st.warning("Selecione um intervalo válido que contenha dias úteis.")
+        if not dates: st.warning("Selecione um intervalo válido que contenha dias úteis.")
         else:
             filiais_map = {'1001': 'CAMPESTRE', '1002': 'VILA ALTO', '1003': 'BAETA NEVES', '1004': 'JARDIM'}
             filiais_hist = df_hist['FILIAL'].astype(str).str.replace(r'\.0$', '', regex=True).unique().tolist()
@@ -699,14 +675,12 @@ with aba3:
                 grid_data.append(row_data)
                 
             df_grid = pd.DataFrame(grid_data)
-            
             st.markdown("#### ⚙️ Status da Semana (Automático)")
             st.info("O sistema identificou automaticamente os dias obrigatórios e as contagens realizadas (unindo lotes da mesma filial).")
             st.dataframe(df_grid, hide_index=True, use_container_width=True)
             
             st.markdown("---")
             st.markdown("#### 📧 E-mail Executivo Gerado")
-            st.info("💡 Para não quebrar o layout do sistema, o HTML do e-mail foi isolado. Clique no botão abaixo para baixar o arquivo, abra no seu navegador (Chrome/Edge), copie a página toda e cole no Outlook!")
             
             df_email = df_hist_limpo[df_hist_limpo['DATA'].isin([d.strftime('%Y-%m-%d') for d in dates])].copy()
             for c in ['VALOR INICIAL', 'SALDO INICIAL', 'DIVERGENCIA DE SALDO', 'DIVERGENCIA DE VALOR', 'CONTAGEM FINAL']:
@@ -733,8 +707,7 @@ with aba3:
                 saldo_final = df_subset['CONTAGEM FINAL'].sum()
                 tipo_mov_vol = "uma redução" if div_saldo < 0 else "um aumento"
                 
-                h = f"[[h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;']]{titulo}[[/h4]]\n"
-                h += "[[ul style='margin-top: 5px; margin-bottom: 15px;']]\n"
+                h = f"[[h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;']]{titulo}[[/h4]]\n[[ul style='margin-top: 5px; margin-bottom: 15px;']]\n"
                 h += f"[[li]]Dos [[b]]{skus_totais}[[/b]] SKUs inventariados, [[b]]{skus_div}[[/b]] apresentaram divergências, representando aproximadamente [[b]]{perc_skus_div:.0f}%[[/b]] da lista.[[/li]]\n"
                 if round(div_valor, 2) != 0:
                     h += f"[[li]]Foi identificada {tipo_mov_valor} de inventário no valor de [[b]]R$ {fmt_br(abs(div_valor), True)}[[/b]], {tipo_mov_estoque} o estoque de R$ {fmt_br(valor_inicial, True)} para R$ {fmt_br(valor_final, True)}, o que representa uma {tipo_baixa_alta} de [[b]]{perc_div_valor:.0f}%[[/b]].[[/li]]\n"
@@ -747,8 +720,7 @@ with aba3:
 
             indicadores_html = ""
             if not df_email.empty:
-                indicadores_html += "[[div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #2e7bcf; margin: 20px 0;']]\n"
-                indicadores_html += "[[h3 style='color: #2e7bcf; margin-bottom: 10px; margin-top: 0;']]📊 Resumo de Indicadores da Semana[[/h3]]\n"
+                indicadores_html += "[[div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #2e7bcf; margin: 20px 0;']]\n[[h3 style='color: #2e7bcf; margin-bottom: 10px; margin-top: 0;']]📊 Resumo de Indicadores da Semana[[/h3]]\n"
                 indicadores_html += gerar_texto_indicadores(df_email, "Consolidado Geral (Todas as Filiais e Lotes)")
                 for f_code in filiais_unicas:
                     df_fil = df_email[df_email['FILIAL'] == f_code]
@@ -758,16 +730,9 @@ with aba3:
                 indicadores_html += "[[/div]]\n"
                 indicadores_html = indicadores_html.replace("[[", "<").replace("]]", ">")
             
-            html_cal = '[[meta charset="UTF-8"]]\n' 
-            html_cal += '[[div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 15px; border: 2px dashed #999; border-radius: 5px; max-width: 800px; margin: auto;"]]\n'
-            html_cal += '[[p]]Boa tarde![[/p]]\n'
-            html_cal += '[[p]]Segue o resumo [[span style="background-color: #ffff00; font-weight: bold;"]]semanal[[/span]] dos inventários.[[/p]]\n'
-            html_cal += '[[p]][[b]]Em anexo, seguem todos os itens ajustados da semana.[[/b]][[/p]]\n'
-            html_cal += '[[p]]Os ajustes são realizados após o envio da recontagem. Conforme alinhado, caso a contagem ou a recontagem não seja realizada, solicitamos o envio da justificativa correspondente.[[/p]]\n'
+            html_cal = '[[meta charset="UTF-8"]]\n[[div style="font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff; padding: 15px; border: 2px dashed #999; border-radius: 5px; max-width: 800px; margin: auto;"]]\n[[p]]Boa tarde![[/p]]\n[[p]]Segue o resumo [[span style="background-color: #ffff00; font-weight: bold;"]]semanal[[/span]] dos inventários.[[/p]]\n[[p]][[b]]Em anexo, seguem todos os itens ajustados da semana.[[/b]][[/p]]\n[[p]]Os ajustes são realizados após o envio da recontagem. Conforme alinhado, caso a contagem ou a recontagem não seja realizada, solicitamos o envio da justificativa correspondente.[[/p]]\n'
             html_cal += indicadores_html
-            html_cal += '[[p]]Calendário de contagens e recontagens por filial:[[/p]]\n'
-            html_cal += '[[table style="border-collapse: collapse; text-align: center; margin-top: 15px;"]]\n'
-            html_cal += '[[tr]][[th style="border: none;"]][[/th]]\n'
+            html_cal += '[[p]]Calendário de contagens e recontagens por filial:[[/p]]\n[[table style="border-collapse: collapse; text-align: center; margin-top: 15px;"]]\n[[tr]][[th style="border: none;"]][[/th]]\n'
             
             for d in dates: html_cal += f'[[th colspan="2" style="border: 1px solid #ccc; padding: 8px 15px; background-color: #f2f2f2; font-size: 16px;"]]{d.day}[[/th]]\n'
             html_cal += '[[/tr]]\n'
@@ -781,19 +746,10 @@ with aba3:
                     if status == "OK": cor_bg, cor_texto = '#a9d08e', '#333'
                     elif status == "FALTOU": cor_bg, cor_texto = '#f4b084', '#333'
                     else: cor_bg, cor_texto = '#ffffff', '#999'
-                    html_cal += f'[[td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;"]]contagem[[/td]]\n'
-                    html_cal += f'[[td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;"]]recontagem[[/td]]\n'
+                    html_cal += f'[[td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;"]]contagem[[/td]]\n[[td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;"]]recontagem[[/td]]\n'
                 html_cal += '[[/tr]]\n'
                 
-            html_cal += '[[/table]][[br]]\n'
-            html_cal += '[[table style="border-collapse: collapse; text-align: center; font-family: Arial, sans-serif; font-size: 12px; font-weight: bold;"]]\n'
-            html_cal += '[[tr]][[td style="border: 1px solid #000; padding: 3px 20px;"]]LEGENDA[[/td]][[/tr]]\n'
-            html_cal += '[[tr]][[td style="border: 1px solid #000; padding: 3px 20px; background-color: #f4b084;"]]NÃO INVENTARIADO[[/td]][[/tr]]\n'
-            html_cal += '[[tr]][[td style="border: 1px solid #000; padding: 3px 20px; background-color: #a9d08e;"]]INVENTARIADO - OK[[/td]][[/tr]]\n'
-            html_cal += '[[/table]]\n'
-            html_cal += '[[p]]Atenciosamente.[[/p]]\n'
-            html_cal += '[[/div]]\n'
-            
+            html_cal += '[[/table]][[br]]\n[[table style="border-collapse: collapse; text-align: center; font-family: Arial, sans-serif; font-size: 12px; font-weight: bold;"]]\n[[tr]][[td style="border: 1px solid #000; padding: 3px 20px;"]]LEGENDA[[/td]][[/tr]]\n[[tr]][[td style="border: 1px solid #000; padding: 3px 20px; background-color: #f4b084;"]]NÃO INVENTARIADO[[/td]][[/tr]]\n[[tr]][[td style="border: 1px solid #000; padding: 3px 20px; background-color: #a9d08e;"]]INVENTARIADO - OK[[/td]][[/tr]]\n[[/table]]\n[[p]]Atenciosamente.[[/p]]\n[[/div]]\n'
             html_cal = html_cal.replace("[[", "<").replace("]]", ">")
             
             st.download_button(
@@ -811,14 +767,9 @@ with aba4:
     if not df_res_pendentes_global.empty:
         st.markdown("### 🔒 Itens Bloqueados nas Contagens em Andamento (SD1)")
         df_travado = df_res_pendentes_global[df_res_pendentes_global['DISPONIVEL PARA INVENTARIO?'] == 'NÃO']
-        
         if not df_travado.empty:
             st.warning(f"Foram encontrados {len(df_travado)} itens nas contagens pendentes que estão travados na classificação fiscal (SD1). Eles não compõem os Resultados Gerenciais.")
-            if 'ID_CONTAGEM' in df_travado.columns:
-                st.dataframe(df_travado[["FILIAL", "ID_CONTAGEM", "CODIGO INTERNO", "DESCRIÇÃO", "CUSTO UNITARIO", "CONTAGEM 1"]], use_container_width=True, hide_index=True)
-            else:
-                st.dataframe(df_travado[["FILIAL", "CODIGO INTERNO", "DESCRIÇÃO", "CUSTO UNITARIO", "CONTAGEM 1"]], use_container_width=True, hide_index=True)
-        else:
-            st.success("Tudo limpo! Nenhum item das contagens atuais está retido no SD1.")
-    else:
-        st.info("Aguardando o processamento de uma contagem na Aba 1 para verificar travamentos no SD1.")
+            if 'ID_CONTAGEM' in df_travado.columns: st.dataframe(df_travado[["FILIAL", "ID_CONTAGEM", "CODIGO INTERNO", "DESCRIÇÃO", "CUSTO UNITARIO", "CONTAGEM 1"]], use_container_width=True, hide_index=True)
+            else: st.dataframe(df_travado[["FILIAL", "CODIGO INTERNO", "DESCRIÇÃO", "CUSTO UNITARIO", "CONTAGEM 1"]], use_container_width=True, hide_index=True)
+        else: st.success("Tudo limpo! Nenhum item das contagens atuais está retido no SD1.")
+    else: st.info("Aguardando o processamento de uma contagem na Aba 1 para verificar travamentos no SD1.")
