@@ -468,7 +468,6 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
                     linhas_a_remover.append(real_idx)
                 continue
             
-            # --- CORREÇÃO DA LEITURA DO 'nan' FANTASMA ---
             ped_item_str = str(row.get('Pedido (Item)', '')).strip()
             if ped_item_str.lower() in ['nan', 'none', '']: 
                 ped_item_str = ""
@@ -476,7 +475,6 @@ def aplicar_salvamento(df_base, lista_edicoes, df_pc, df_cad, df_barras):
             ped_nf_str = str(ped_nf_str).strip()
             if ped_nf_str.lower() in ['nan', 'none', '']: 
                 ped_nf_str = ""
-            # ---------------------------------------------
             
             peds_multiplos = []
             if ',' in ped_item_str: peds_multiplos = [limpar_zeros_pedido(p) for p in ped_item_str.split(',') if p.strip()]
@@ -609,16 +607,33 @@ with st.sidebar:
 
     st.divider()
     st.header("⚙️ Administração")
-    if st.button("🗑️️ Limpar Notas Pendentes"):
+    
+    with st.expander("🧹 Limpeza de Base (Memória)"):
+        st.write("Apague notas já finalizadas e exportadas para o Protheus.")
+        data_limite = st.date_input("Apagar notas confirmadas até o dia:")
+        
+        if st.button("🗑️ Limpar Notas Antigas", type="primary", use_container_width=True):
+            data_str = data_limite.strftime('%Y-%m-%d')
+            sql_del = f"DELETE FROM recebimentos_xml WHERE \"Confirmado\" = true AND \"Data Finalização\" <= '{data_str}'"
+            try:
+                with conn.session as s:
+                    s.execute(text(sql_del))
+                    s.commit()
+                st.success(f"Notas confirmadas até {data_str} removidas com sucesso!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao limpar: {e}")
+
+    if st.button("🗑 Limpar Apenas Notas Pendentes", use_container_width=True):
+        sql_del_pend = "DELETE FROM recebimentos_xml WHERE \"Confirmado\" = false"
         try:
-            df_temp = conn.query("SELECT * FROM recebimentos_xml", ttl=0)
-            if not df_temp.empty:
-                df_temp = df_temp[df_temp['Finalizado'] == True]
-                salvar_recebimentos_nuvem(df_temp)
-            st.success("Pendentes removidos da nuvem! Reimporte os XMLs se necessário.")
+            with conn.session as s:
+                s.execute(text(sql_del_pend))
+                s.commit()
+            st.success("Pendentes removidos!")
             st.rerun()
         except:
-            st.warning("O banco de dados de recebimentos ainda está vazio.")
+            st.warning("Sem pendentes para limpar.")
 
 if not df_recebimentos.empty:
     df_recebimentos = recalcular_pendentes(df_recebimentos)
@@ -679,7 +694,6 @@ if not df_recebimentos.empty:
                         with st.form(key=f"form_nf_{filial}_{nf}"):
                             col1, col2 = st.columns([2, 2])
                             with col1:
-                                # A Chave de Segurança (key) foi adicionada aqui
                                 novo_ped_nf = st.text_input("Pedido Master da NF (Use vírgula para dividir autom.):", value=pedido_nf_atual, key=f"ped_master_{filial}_{nf}")
                             
                             cols_view = [
