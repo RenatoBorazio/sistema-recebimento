@@ -13,9 +13,19 @@ st.markdown("Cruze Contagens, Apure Divergências e Gerencie os Resultados Conso
 # --- CONEXÃO COM O BANCO DE DADOS NA NUVEM ---
 conn = st.connection("supabase", type="sql", connect_args={"prepare_threshold": None})
 
-# --- NOVAS FUNÇÕES DE GRAVAÇÃO (BLINDADAS CONTRA CRASHES) ---
+# --- NOVAS FUNÇÕES DE GRAVAÇÃO E ESTRUTURA (BLINDADAS CONTRA CRASHES) ---
+def garantir_coluna(tabela):
+    """Verifica e adiciona automaticamente a coluna ID_CONTAGEM no Supabase se for uma tabela antiga"""
+    try:
+        with conn.session as s:
+            s.execute(text(f'ALTER TABLE {tabela} ADD COLUMN IF NOT EXISTS "ID_CONTAGEM" VARCHAR;'))
+            s.commit()
+    except:
+        pass
+
 def gravar_historico_seguro(df_salvar, periodo, data, filial, lote):
     """Grava o histórico usando APPEND direto. Nunca apaga a tabela inteira."""
+    garantir_coluna("historico_inventario")
     try:
         sql_delete = f"""
             DELETE FROM historico_inventario 
@@ -41,6 +51,7 @@ def estornar_historico_seguro(periodo, data, filial, lote):
 
 def salvar_pendentes_seguro(df_novo, lote):
     """Grava os pendentes de um lote específico sem afetar os outros."""
+    garantir_coluna("inventario_pendente")
     try:
         sql_delete = f"""DELETE FROM inventario_pendente WHERE "ID_CONTAGEM" = '{lote}'"""
         with conn.session as s:
@@ -157,7 +168,7 @@ def checar_bases():
     return faltantes
 
 if checar_bases():
-    st.warning(f"⚠️️ Cofre incompleto para Inventário. Vá na Central de Bases e sincronize: {', '.join(checar_bases())}")
+    st.warning(f"⚠️ Cofre incompleto para Inventário. Vá na Central de Bases e sincronize: {', '.join(checar_bases())}")
     st.stop()
 
 def padronizar_colunas(df_bruto, nome_coluna_alvo):
