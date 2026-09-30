@@ -8,7 +8,7 @@ from sqlalchemy import text
 st.set_page_config(page_title="Módulo de Inventário", page_icon="📋", layout="wide")
 
 st.title("📋 Módulo de Inventário")
-st.markdown("Cruze Contagens, Apure Divergências e Gerencie os Resultados Consolidados por Período.")
+st.markdown("Cruze Contagens, Apure Divergências e Gerencie os Resultados Consolidados por Período e Lote.")
 
 # --- CONEXÃO COM O BANCO DE DADOS NA NUVEM ---
 conn = st.connection("supabase", type="sql", connect_args={"prepare_threshold": None})
@@ -66,9 +66,9 @@ try:
         c_custo_st = obter_primeira_coluna(df_cad_raw, ['CUSTO STAND', 'CUSTO STAND.', 'ULT. PRECO', 'ULTIMO PRECO', 'PRECO VENDA'])
         
         df_cad = pd.DataFrame()
-        df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
-        df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
-        df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', '<NA>'], '').str.strip() if c_desc else ""
+        df_cad['CÓDIGO DE BARRAS'] = df_cad_raw[c_barras].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_barras else ""
+        df_cad['CÓDIGO INTERNO'] = df_cad_raw[c_int].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_int else ""
+        df_cad['DESCRIÇÃO SB1'] = df_cad_raw[c_desc].astype(str).replace(['nan', 'None', ''], '').str.strip() if c_desc else ""
         df_cad['CUSTO STAND'] = safe_numeric(df_cad_raw[c_custo_st]) if c_custo_st else 0.0
     else:
         df_cad = pd.DataFrame()
@@ -94,9 +94,9 @@ try:
         c_custo = obter_primeira_coluna(df_est_raw, ['CUSTO UNITARIO', 'CUSTO UNITÁRIO', 'CUSTO', 'CM1', 'B2_CM1', 'CUSTO MEDIO', 'CUSTO MÉDIO', 'VALOR UNITARIO', 'VALOR UNITÁRIO'])
         
         df_est = pd.DataFrame()
-        df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
-        df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
-        df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
+        df_est['Filial'] = df_est_raw[c_filial].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial else ""
+        df_est['Produto'] = df_est_raw[c_prod].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod else ""
+        df_est['Armazem'] = df_est_raw[c_arm].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_arm else "01"
         df_est['Saldo Inicial'] = safe_numeric(df_est_raw[c_saldo]) if c_saldo else 0.0
         df_est['Custo Unitario'] = safe_numeric(df_est_raw[c_custo]) if c_custo else 0.0
     else:
@@ -112,8 +112,8 @@ try:
         c_prod_sd1 = obter_primeira_coluna(df_sd1_raw, ['PRODUTO', 'CÓDIGO INTERNO', 'CODIGO INTERNO', 'CODIGO', 'CÓDIGO', 'D1_COD'])
         
         df_sd1 = pd.DataFrame()
-        df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
-        df_sd1['Produto'] = df_sd1_raw[c_prod_sd1].astype(str).replace(['nan', 'None', '<NA>'], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod_sd1 else ""
+        df_sd1['Filial'] = df_sd1_raw[c_filial_sd1].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_filial_sd1 else ""
+        df_sd1['Produto'] = df_sd1_raw[c_prod_sd1].astype(str).replace(['nan', 'None', ''], '').str.replace(r'\.0$', '', regex=True).str.strip() if c_prod_sd1 else ""
     else:
         df_sd1 = pd.DataFrame()
 except:
@@ -219,7 +219,7 @@ def processar_contagem(df_contagem):
             
         val_c2 = row.get('CONTAGEM 2')
         is_recontado = False
-        if pd.notna(val_c2) and str(val_c2).strip() not in ['', 'nan', 'None', '<NA>']:
+        if pd.notna(val_c2) and str(val_c2).strip() not in ['', 'nan', 'None', '']:
             val_c2_str = str(val_c2)
             if ',' in val_c2_str: val_c2_str = val_c2_str.replace('.', '').replace(',', '.')
             contagem_2 = pd.to_numeric(val_c2_str, errors='coerce')
@@ -241,7 +241,6 @@ def processar_contagem(df_contagem):
             if 'DESCRIÇÃO SB1' in df_cad.columns:
                 descricao = str(m_cad['DESCRIÇÃO SB1'].iloc[0])
         else:
-            # BLINDAGEM CONTRA KEYERROR ('EAN' ou 'CODIGO INTERNO' faltando)
             if not df_barras.empty and 'EAN' in df_barras.columns and 'CODIGO INTERNO' in df_barras.columns:
                 m_barra = df_barras[df_barras['EAN'].astype(str) == codigo_informado]
                 if not m_barra.empty:
@@ -255,8 +254,7 @@ def processar_contagem(df_contagem):
         if not cod_interno: cod_interno = codigo_informado 
         if not ean_oficial_sb1: ean_oficial_sb1 = codigo_informado 
 
-        # --- BUSCANDO A CURVA ABC POR FILIAL ---
-        curva_abc = "C" # Padrão é C
+        curva_abc = "C" 
         if cod_interno and not df_curva.empty and 'CODIGO' in df_curva.columns:
             if 'FILIAL' in df_curva.columns and not df_curva['FILIAL'].eq("").all():
                 m_curva = df_curva[(df_curva['CODIGO'] == cod_interno) & (df_curva['FILIAL'] == filial)]
@@ -284,10 +282,11 @@ def processar_contagem(df_contagem):
             col_arm_est = 'Armazem' if 'Armazem' in df_est.columns else ('ARMAZEM' if 'ARMAZEM' in df_est.columns else None)
             if col_arm_est:
                 match_est_arm = match_est[match_est[col_arm_est].astype(str).str.zfill(2) == armazem]
-                if not match_est_arm.empty: match_est = match_est_arm
+                match_est = match_est_arm
                 
-            saldo_inicial = float(match_est['Saldo Inicial'].iloc[0])
-            custo_unitario = float(match_est['Custo Unitario'].iloc[0])
+            if not match_est.empty:
+                saldo_inicial = float(match_est['Saldo Inicial'].sum())
+                custo_unitario = float(match_est['Custo Unitario'].iloc[0])
             
         if custo_unitario <= 0.0:
             m_cad_custo = df_cad[df_cad['CÓDIGO INTERNO'].astype(str) == cod_interno]
@@ -334,14 +333,23 @@ aba1, aba2, aba3, aba4 = st.tabs(["⏳ Contagens em Andamento", "📈 Resultados
 with st.sidebar:
     st.header("📥 Iniciar Nova Apuração")
     st.info("Suba os arquivos da 1ª Contagem. Eles ficarão salvos na nuvem aguardando a finalização ou recontagem.")
+    
+    nome_lote_input = st.text_input("Identificador da Contagem (Opcional):", placeholder="Ex: Corredor 5, Setor Ração...")
+    
     arq_contagem_1 = st.file_uploader("Upload: 1ª Contagem", type=["xlsx", "xls", "csv"], accept_multiple_files=True)
     if arq_contagem_1:
         if st.button("➕ Salvar 1ª Contagem", type="primary", use_container_width=True):
             with st.spinner("Salvando contagem inicial na nuvem..."):
                 df_c1 = processar_multiplos_arquivos(arq_contagem_1, 'CONTAGEM 1')
                 if not df_c1.empty:
+                    lote_final = nome_lote_input.strip() if nome_lote_input.strip() else f"Lote {datetime.datetime.now().strftime('%H:%M:%S')}"
+                    df_c1['ID_CONTAGEM'] = lote_final
+                    
                     df_pend = carregar_pendentes()
-                    df_novo = pd.concat([df_pend, df_c1]).drop_duplicates(subset=['Filial', 'ARMAZEM', 'INFORMAR CODIGO'], keep='last')
+                    if not df_pend.empty and 'ID_CONTAGEM' not in df_pend.columns:
+                        df_pend['ID_CONTAGEM'] = "Lote Legado"
+                        
+                    df_novo = pd.concat([df_pend, df_c1]).drop_duplicates(subset=['ID_CONTAGEM', 'Filial', 'ARMAZEM', 'INFORMAR CODIGO'], keep='last')
                     salvar_pendentes_nuvem(df_novo)
                     st.success("Salvo na nuvem com sucesso!")
                     st.rerun()
@@ -354,44 +362,51 @@ with st.sidebar:
         st.rerun()
 
 df_pendentes = carregar_pendentes()
-df_res_pendentes_global = pd.DataFrame() # Usado na Aba 4
+df_res_pendentes_global = pd.DataFrame() 
 
 # --- ABA 1: NOVA APURAÇÃO DO DIA (EM ANDAMENTO) ---
 with aba1:
     if not df_pendentes.empty:
         st.markdown("### Árvore de Contagens Pendentes")
-        filiais_pendentes = sorted(df_pendentes['Filial'].astype(str).unique())
+        
+        if 'ID_CONTAGEM' not in df_pendentes.columns:
+            df_pendentes['ID_CONTAGEM'] = "Lote Legado"
+            
+        lotes_pendentes = sorted(df_pendentes['ID_CONTAGEM'].astype(str).unique())
         
         lista_res_filiais = []
         
-        for filial in filiais_pendentes:
-            df_filial_c1 = df_pendentes[df_pendentes['Filial'] == filial].copy()
-            st.subheader(f"🏢 Filial: {filial}")
+        for lote in lotes_pendentes:
+            df_lote_c1 = df_pendentes[df_pendentes['ID_CONTAGEM'] == lote].copy()
+            filial = df_lote_c1['Filial'].iloc[0] if not df_lote_c1.empty else "N/D"
             
-            with st.expander(f"⚙️ Apuração Pendente ({len(df_filial_c1)} itens na 1ª Contagem)", expanded=True):
+            st.subheader(f"📦 Lote: {lote} | 🏢 Filial: {filial}")
+            
+            with st.expander(f"⚙️ Apuração Pendente ({len(df_lote_c1)} itens na 1ª Contagem)", expanded=True):
                 
                 col_del, _ = st.columns([2, 8])
                 with col_del:
-                    if st.button(f"🗑️ Excluir Contagem ({filial})", key=f"del_c1_{filial}"):
-                        df_pend_new = df_pendentes[df_pendentes['Filial'] != filial]
+                    if st.button(f"🗑️ Excluir Contagem", key=f"del_c1_{lote}"):
+                        df_pend_new = df_pendentes[df_pendentes['ID_CONTAGEM'] != lote]
                         salvar_pendentes_nuvem(df_pend_new)
                         st.rerun()
                 
                 st.markdown("#### 1. Importar Recontagem (Opcional)")
-                arq_c2 = st.file_uploader(f"Anexar 2ª Contagem ({filial})", type=["xlsx", "xls", "csv"], accept_multiple_files=True, key=f"up_c2_{filial}")
+                arq_c2 = st.file_uploader(f"Anexar 2ª Contagem", type=["xlsx", "xls", "csv"], accept_multiple_files=True, key=f"up_c2_{lote}")
                 
-                df_base_apuracao = df_filial_c1.copy()
+                df_base_apuracao = df_lote_c1.copy()
                 
                 if arq_c2:
                     df_c2 = processar_multiplos_arquivos(arq_c2, 'CONTAGEM 2')
                     if not df_c2.empty:
                         df_base_apuracao = pd.merge(df_base_apuracao, df_c2, on=['Filial', 'INFORMAR CODIGO', 'ARMAZEM'], how='outer')
+                        df_base_apuracao['ID_CONTAGEM'] = lote 
                 
                 with st.spinner("Processando Apuração..."):
                     df_res = processar_contagem(df_base_apuracao)
+                    df_res['ID_CONTAGEM'] = lote
                     lista_res_filiais.append(df_res)
                 
-                # --- Exibição de Resultados ---
                 div_rs = df_res['DIVERGENCIA DE VALOR'].sum()
                 div_pcs = df_res['DIVERGENCIA DE SALDO'].sum()
                 
@@ -400,9 +415,8 @@ with aba1:
                 df_view = df_res.copy()
                 df_view['%DIV QTDE'] = (df_view['%DIV QTDE'] * 100).map("{:.2f}%".format)
                 df_view['%DIV VALOR'] = (df_view['%DIV VALOR'] * 100).map("{:.2f}%".format)
-                st.dataframe(df_view.drop(columns=['EAN OFICIAL (SB1)', 'FILIAL']), use_container_width=True, hide_index=True)
+                st.dataframe(df_view.drop(columns=['EAN OFICIAL (SB1)', 'FILIAL', 'ID_CONTAGEM']), use_container_width=True, hide_index=True)
                 
-                # --- Botões de Relatórios ---
                 df_recontagem = df_res[(df_res['DIVERGENCIA DE SALDO'] != 0) & (df_res['DISPONIVEL PARA INVENTARIO?'] == 'SIM')].copy()
                 
                 col_btn1, col_btn2 = st.columns([1, 1])
@@ -423,18 +437,18 @@ with aba1:
                         })
                         output_rec = io.BytesIO()
                         with pd.ExcelWriter(output_rec, engine='openpyxl') as writer:
-                            df_export_rec.to_excel(writer, sheet_name=f"Recontagem_{filial}", index=False)
+                            df_export_rec.to_excel(writer, sheet_name=f"Recontagem", index=False)
                         
                         st.download_button(
-                            f"🔄 Formulário de Recontagem ({filial})", 
+                            f"🔄 Baixar Recontagem ({filial})", 
                             data=output_rec.getvalue(), 
-                            file_name=f"Planilha_Recontagem_{filial}.xlsx", 
+                            file_name=f"{filial}_Recontagem_{lote}.xlsx", 
                             type="secondary",
                             use_container_width=True,
-                            key=f"btn_rec_{filial}"
+                            key=f"btn_rec_{lote}"
                         )
                     else:
-                        st.success("🎉 Não há divergências nesta filial! Nenhuma recontagem necessária.")
+                        st.success("🎉 Não há divergências! Nenhuma recontagem necessária.")
                         
                 with col_btn2:
                     df_protheus_source = df_res[(df_res['DISPONIVEL PARA INVENTARIO?'] == 'SIM') & (df_res['DIVERGENCIA DE SALDO'] != 0)]
@@ -451,22 +465,22 @@ with aba1:
                         st.download_button(
                             f"🔌 Baixar Arquivo PROTHEUS ({filial})", 
                             data=output_prot.getvalue().encode('utf-8-sig'), 
-                            file_name=f"IMPORTACAO_{filial}.csv", 
+                            file_name=f"{filial}_IMPORTACAO_{lote}.csv", 
                             type="primary",
                             use_container_width=True,
-                            key=f"btn_prot_{filial}"
+                            key=f"btn_prot_{lote}"
                         )
                     else:
-                        st.success("🟢 100% Batido! Não há divergências para exportar ao Protheus.")
+                        st.success("🟢 100% Batido! Nenhuma exportação necessária.")
                 
                 st.markdown("---")
                 st.markdown("#### 2. Finalizar e Gravar no Histórico")
-                with st.form(key=f"form_fin_{filial}"):
+                with st.form(key=f"form_fin_{lote}"):
                     c_p1, c_p2 = st.columns(2)
                     with c_p1:
-                        per_input = st.text_input("Período (Ex: P9):", value="P9", key=f"per_{filial}")
+                        per_input = st.text_input("Período (Ex: P9):", value="P9", key=f"per_{lote}")
                     with c_p2:
-                        dt_input = st.date_input("Data do Inventário:", value=datetime.date.today(), key=f"dt_{filial}")
+                        dt_input = st.date_input("Data do Inventário:", value=datetime.date.today(), key=f"dt_{lote}")
                         
                     btn_fin = st.form_submit_button("✅ Gravar Oficialmente e Encerrar", type="primary", use_container_width=True)
                     if btn_fin:
@@ -476,17 +490,20 @@ with aba1:
                         df_salvar.insert(0, 'PERIODO', str(per_input))
                         
                         if not df_hist.empty:
+                            if 'ID_CONTAGEM' not in df_hist.columns:
+                                df_hist['ID_CONTAGEM'] = "Lote Legado"
                             df_hist = df_hist[~((df_hist['PERIODO'].astype(str) == str(per_input)) & 
                                                 (df_hist['DATA'].astype(str) == str(dt_input)) & 
-                                                (df_hist['FILIAL'].astype(str) == filial))]
+                                                (df_hist['FILIAL'].astype(str) == filial) &
+                                                (df_hist['ID_CONTAGEM'].astype(str) == lote))]
                                                 
                         df_hist_novo = pd.concat([df_hist, df_salvar], ignore_index=True)
                         salvar_historico_nuvem(df_hist_novo)
                         
-                        df_pend_new = df_pendentes[df_pendentes['Filial'] != filial]
+                        df_pend_new = df_pendentes[df_pendentes['ID_CONTAGEM'] != lote]
                         salvar_pendentes_nuvem(df_pend_new)
                         
-                        st.success(f"Inventário da filial {filial} gravado com sucesso!")
+                        st.success(f"Lote '{lote}' gravado com sucesso no Histórico!")
                         st.rerun()
 
         if lista_res_filiais:
@@ -507,22 +524,22 @@ with aba2:
         with col_f1:
             per_selecionado = st.selectbox("Selecione o Período:", options=periodos_disp, index=len(periodos_disp)-1)
         with col_f2:
-            visao = st.radio("Selecione a Visão:", options=["Visão Consolidada (Total do Período)", "Visão Detalhada (Por Dia/Filial)"], horizontal=True)
+            visao = st.radio("Selecione a Visão:", options=["Visão Consolidada (Total do Período)", "Visão Detalhada (Por Dia/Filial/Lote)"], horizontal=True)
             
         st.divider()
         
         df_filtro = df_hist[(df_hist['PERIODO'].astype(str) == str(per_selecionado)) & (df_hist['DISPONIVEL PARA INVENTARIO?'].astype(str) == 'SIM')].copy()
         
         if not df_filtro.empty:
+            if 'ID_CONTAGEM' not in df_filtro.columns:
+                df_filtro['ID_CONTAGEM'] = "Lote Legado"
+                
             if "Detalhada" in visao:
                 datas_unicas = sorted(df_filtro['DATA'].astype(str).unique())
-                
                 def formatar_data_br(d_str):
                     try:
                         return datetime.datetime.strptime(d_str, '%Y-%m-%d').strftime('%d/%m/%Y')
-                    except:
-                        return d_str
-                        
+                    except: return d_str
                 mapa_datas = {d: formatar_data_br(d) for d in datas_unicas}
                 
                 datas_selecionadas = st.multiselect(
@@ -537,13 +554,10 @@ with aba2:
 
             if not df_filtro.empty:
                 resumo_gerencial = []
-                
                 cols_calc = ['VALOR INICIAL', 'SALDO INICIAL', 'DIVERGENCIA DE SALDO', 'DIVERGENCIA DE VALOR', 'CONTAGEM FINAL']
                 for c in cols_calc:
-                    if c in df_filtro.columns:
-                        df_filtro[c] = pd.to_numeric(df_filtro[c], errors='coerce').fillna(0)
-                    else:
-                        df_filtro[c] = 0.0
+                    if c in df_filtro.columns: df_filtro[c] = pd.to_numeric(df_filtro[c], errors='coerce').fillna(0)
+                    else: df_filtro[c] = 0.0
 
                 if "Consolidada" in visao:
                     for filial, group in df_filtro.groupby('FILIAL'):
@@ -553,10 +567,9 @@ with aba2:
                             "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                            "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. VALOR R\(": f"R\) {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
-                        
                     df_detalhe = df_filtro.groupby(['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO'], as_index=False).agg({
                         'SALDO INICIAL': 'sum',
                         'CONTAGEM FINAL': 'sum',
@@ -566,22 +579,18 @@ with aba2:
                     })
                 else:
                     for (data, filial), group in df_filtro.groupby(['DATA', 'FILIAL']):
-                        try:
-                            data_formatada = datetime.datetime.strptime(str(data), '%Y-%m-%d').strftime('%d/%m/%Y')
-                        except:
-                            data_formatada = str(data)
-                            
+                        try: data_formatada = datetime.datetime.strptime(str(data), '%Y-%m-%d').strftime('%d/%m/%Y')
+                        except: data_formatada = str(data)
                         resumo_gerencial.append({
                             "DATA DA CONTAGEM": data_formatada,
                             "RESULTADOS INVENTÁRIO": filial,
                             "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                            "DIV. VALOR R$": f"R$ {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. VALOR R\(": f"R\) {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
-                        
-                    df_detalhe = df_filtro[['DATA', 'FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO', 'SALDO INICIAL', 'CONTAGEM FINAL', 'DIVERGENCIA DE SALDO', 'VALOR INICIAL', 'DIVERGENCIA DE VALOR']].copy()
+                    df_detalhe = df_filtro[['DATA', 'FILIAL', 'ID_CONTAGEM', 'CODIGO INTERNO', 'DESCRIÇÃO', 'SALDO INICIAL', 'CONTAGEM FINAL', 'DIVERGENCIA DE SALDO', 'VALOR INICIAL', 'DIVERGENCIA DE VALOR']].copy()
                 
                 st.markdown("### 📋 Resumo Agregado")
                 df_resumo_gerencial = pd.DataFrame(resumo_gerencial)
@@ -589,7 +598,6 @@ with aba2:
                 
                 st.markdown("---")
                 st.markdown("### 🚨 Indicadores de Maior Impacto (Top 5)")
-                
                 df_detalhe['ABS_DIV_VALOR'] = df_detalhe['DIVERGENCIA DE VALOR'].abs()
                 df_detalhe['ABS_DIV_SALDO'] = df_detalhe['DIVERGENCIA DE SALDO'].abs()
                 
@@ -600,7 +608,6 @@ with aba2:
                     view_top5_valor = top5_valor[['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO', 'DIVERGENCIA DE VALOR']].copy()
                     view_top5_valor['DIVERGENCIA DE VALOR'] = view_top5_valor['DIVERGENCIA DE VALOR'].apply(lambda x: f"R$ {x:,.2f}")
                     st.dataframe(view_top5_valor, use_container_width=True, hide_index=True)
-                    
                 with col_t2:
                     st.markdown("#### Maiores Variações de Quantidade")
                     top5_saldo = df_detalhe.sort_values(by='ABS_DIV_SALDO', ascending=False).head(5)
@@ -622,34 +629,32 @@ with aba2:
                 
                 st.markdown("---")
                 with st.expander("⚠️ Zona de Perigo: Estornar / Excluir Inventário Salvo"):
-                    st.write("Use esta opção caso tenha gravado uma contagem errada e precise apagá-la do histórico (isso não afeta os arquivos no seu computador, apenas a nuvem).")
+                    st.write("Use esta opção caso tenha gravado uma contagem errada e precise apagá-la do histórico.")
                     
-                    df_opcoes = df_filtro[['DATA', 'FILIAL']].drop_duplicates()
-                    lista_estorno = [f"{r['DATA']} - Filial {r['FILIAL']}" for _, r in df_opcoes.iterrows()]
-                    
+                    df_opcoes = df_filtro[['DATA', 'FILIAL', 'ID_CONTAGEM']].drop_duplicates()
+                    lista_estorno = [f"{r['DATA']} | Filial {r['FILIAL']} | Lote: {r['ID_CONTAGEM']}" for _, r in df_opcoes.iterrows()]
                     selecao_estorno = st.multiselect(f"Selecione os inventários do {per_selecionado} que deseja estornar:", options=lista_estorno)
                     
                     if st.button("🗑️ Estornar Inventários Selecionados", type="primary"):
                         if selecao_estorno:
                             df_hist_full = carregar_historico()
-                            
                             for item in selecao_estorno:
-                                d_str, f_str = item.split(" - Filial ")
-                                d_str = d_str.strip()
-                                f_str = f_str.strip()
+                                partes = item.split(" | ")
+                                d_str = partes[0].strip()
+                                f_str = partes[1].replace("Filial ", "").strip()
+                                l_str = partes[2].replace("Lote: ", "").strip()
                                 
                                 df_hist_full = df_hist_full[~((df_hist_full['PERIODO'].astype(str) == str(per_selecionado)) & 
                                                               (df_hist_full['DATA'].astype(str) == d_str) & 
-                                                              (df_hist_full['FILIAL'].astype(str) == f_str))]
-                            
+                                                              (df_hist_full['FILIAL'].astype(str) == f_str) &
+                                                              (df_hist_full['ID_CONTAGEM'].astype(str) == l_str))]
                             salvar_historico_nuvem(df_hist_full)
-                                
-                            st.success("Inventário(s) estornado(s) com sucesso!")
+                            st.success("Lote(s) estornado(s) com sucesso!")
                             st.rerun()
                         else:
                             st.warning("Selecione pelo menos um item acima para estornar.")
             else:
-                st.warning("⚠️ Nenhuma data selecionada. Por favor, selecione pelo menos uma data no filtro acima para visualizar os dados.")
+                st.warning("⚠️ Nenhuma data selecionada.")
         else:
             st.info(f"Nenhum dado válido gravado para o período {per_selecionado}.")
     else:
@@ -659,35 +664,23 @@ with aba2:
 with aba3:
     st.markdown("### 📅 Gerador de Reporte Semanal")
     st.write("Gere o e-mail padronizado e o calendário de status das contagens. Totalmente automatizado.")
-    
     df_hist = carregar_historico()
     
     if not df_hist.empty:
         col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            data_inicio = st.date_input("Data Inicial da Semana:", value=datetime.date.today() - datetime.timedelta(days=datetime.date.today().weekday()))
-        with col_d2:
-            data_fim = st.date_input("Data Final da Semana:", value=data_inicio + datetime.timedelta(days=4))
+        with col_d1: data_inicio = st.date_input("Data Inicial da Semana:", value=datetime.date.today() - datetime.timedelta(days=datetime.date.today().weekday()))
+        with col_d2: data_fim = st.date_input("Data Final da Semana:", value=data_inicio + datetime.timedelta(days=4))
             
         ignorar_fds = st.checkbox("Ignorar Sábado e Domingo no calendário", value=True)
-        
         dates = [data_inicio + datetime.timedelta(days=i) for i in range((data_fim - data_inicio).days + 1)]
-        if ignorar_fds:
-            dates = [d for d in dates if d.weekday() < 5]
+        if ignorar_fds: dates = [d for d in dates if d.weekday() < 5]
             
         if not dates:
             st.warning("Selecione um intervalo válido que contenha dias úteis.")
         else:
             filiais_map = {'1001': 'CAMPESTRE', '1002': 'VILA ALTO', '1003': 'BAETA NEVES', '1004': 'JARDIM'}
-            
             filiais_hist = df_hist['FILIAL'].astype(str).str.replace(r'\.0$', '', regex=True).unique().tolist()
-            
-            filiais_unicas = []
-            for f in filiais_hist:
-                if f not in filiais_unicas: filiais_unicas.append(f)
-            for code in filiais_map.keys():
-                if code not in filiais_unicas: filiais_unicas.append(code)
-                
+            filiais_unicas = list(set(filiais_hist + list(filiais_map.keys())))
             filiais_unicas = sorted(filiais_unicas)
             
             df_hist_limpo = df_hist.copy()
@@ -700,23 +693,15 @@ with aba3:
                 for d in dates:
                     d_str = d.strftime('%Y-%m-%d')
                     d_label = d.strftime('%d/%m')
-                    
                     teve_contagem = not df_hist_limpo[(df_hist_limpo['FILIAL'] == f_code) & (df_hist_limpo['DATA'] == d_str)].empty
-                    
-                    if teve_contagem:
-                        row_data[d_label] = "OK"
-                    else:
-                        if d.weekday() in [1, 2, 3]:
-                            row_data[d_label] = "FALTOU"
-                        else:
-                            row_data[d_label] = "LIVRE"
-                            
+                    if teve_contagem: row_data[d_label] = "OK"
+                    else: row_data[d_label] = "FALTOU" if d.weekday() in [1, 2, 3] else "LIVRE"
                 grid_data.append(row_data)
                 
             df_grid = pd.DataFrame(grid_data)
             
             st.markdown("#### ⚙️ Status da Semana (Automático)")
-            st.info("O sistema identificou automaticamente os dias obrigatórios e as contagens realizadas.")
+            st.info("O sistema identificou automaticamente os dias obrigatórios e as contagens realizadas (unindo lotes da mesma filial).")
             st.dataframe(df_grid, hide_index=True, use_container_width=True)
             
             st.markdown("---")
@@ -725,8 +710,7 @@ with aba3:
             
             df_email = df_hist_limpo[df_hist_limpo['DATA'].isin([d.strftime('%Y-%m-%d') for d in dates])].copy()
             for c in ['VALOR INICIAL', 'SALDO INICIAL', 'DIVERGENCIA DE SALDO', 'DIVERGENCIA DE VALOR', 'CONTAGEM FINAL']:
-                if c in df_email.columns:
-                    df_email[c] = pd.to_numeric(df_email[c], errors='coerce').fillna(0)
+                if c in df_email.columns: df_email[c] = pd.to_numeric(df_email[c], errors='coerce').fillna(0)
             
             def fmt_br(val, is_currency=False):
                 s = f"{val:,.2f}" if is_currency else f"{val:,.0f}"
@@ -734,40 +718,30 @@ with aba3:
             
             def gerar_texto_indicadores(df_subset, titulo):
                 if df_subset.empty: return ""
-                
                 skus_totais = len(df_subset)
                 skus_div = len(df_subset[df_subset['DIVERGENCIA DE SALDO'] != 0])
                 perc_skus_div = (skus_div / skus_totais * 100) if skus_totais > 0 else 0
-                
                 valor_inicial = df_subset['VALOR INICIAL'].sum()
                 div_valor = df_subset['DIVERGENCIA DE VALOR'].sum()
                 valor_final = valor_inicial + div_valor
                 perc_div_valor = (abs(div_valor) / valor_inicial * 100) if valor_inicial > 0 else 0
-                
                 tipo_mov_valor = "uma perda" if div_valor < 0 else "um ganho"
                 tipo_mov_estoque = "reduzindo" if div_valor < 0 else "aumentando"
                 tipo_baixa_alta = "baixa" if div_valor < 0 else "alta"
-                
                 saldo_inicial = df_subset['SALDO INICIAL'].sum()
                 div_saldo = df_subset['DIVERGENCIA DE SALDO'].sum()
                 saldo_final = df_subset['CONTAGEM FINAL'].sum()
-                
                 tipo_mov_vol = "uma redução" if div_saldo < 0 else "um aumento"
                 
                 h = f"[[h4 style='margin-bottom: 5px; margin-top: 15px; color: #333;']]{titulo}[[/h4]]\n"
                 h += "[[ul style='margin-top: 5px; margin-bottom: 15px;']]\n"
                 h += f"[[li]]Dos [[b]]{skus_totais}[[/b]] SKUs inventariados, [[b]]{skus_div}[[/b]] apresentaram divergências, representando aproximadamente [[b]]{perc_skus_div:.0f}%[[/b]] da lista.[[/li]]\n"
-                
                 if round(div_valor, 2) != 0:
                     h += f"[[li]]Foi identificada {tipo_mov_valor} de inventário no valor de [[b]]R$ {fmt_br(abs(div_valor), True)}[[/b]], {tipo_mov_estoque} o estoque de R$ {fmt_br(valor_inicial, True)} para R$ {fmt_br(valor_final, True)}, o que representa uma {tipo_baixa_alta} de [[b]]{perc_div_valor:.0f}%[[/b]].[[/li]]\n"
-                else:
-                    h += f"[[li]]O valor do estoque se manteve em R$ {fmt_br(valor_inicial, True)}, sem perdas ou ganhos financeiros.[[/li]]\n"
-                    
+                else: h += f"[[li]]O valor do estoque se manteve em R$ {fmt_br(valor_inicial, True)}, sem perdas ou ganhos financeiros.[[/li]]\n"
                 if round(div_saldo, 0) != 0:
                     h += f"[[li]]Em volume, houve {tipo_mov_vol} de [[b]]{fmt_br(abs(div_saldo))}[[/b]] unidades, fazendo o estoque passar de {fmt_br(saldo_inicial)} para {fmt_br(saldo_final)} unidades.[[/li]]\n"
-                else:
-                    h += f"[[li]]Em volume, o estoque geral de {fmt_br(saldo_inicial)} unidades foi mantido.[[/li]]\n"
-                    
+                else: h += f"[[li]]Em volume, o estoque geral de {fmt_br(saldo_inicial)} unidades foi mantido.[[/li]]\n"
                 h += "[[/ul]]\n"
                 return h.replace("[[", "<").replace("]]", ">")
 
@@ -775,7 +749,7 @@ with aba3:
             if not df_email.empty:
                 indicadores_html += "[[div style='background-color: #f9f9f9; padding: 10px; border-left: 4px solid #2e7bcf; margin: 20px 0;']]\n"
                 indicadores_html += "[[h3 style='color: #2e7bcf; margin-bottom: 10px; margin-top: 0;']]📊 Resumo de Indicadores da Semana[[/h3]]\n"
-                indicadores_html += gerar_texto_indicadores(df_email, "Consolidado Geral (Todas as Filiais)")
+                indicadores_html += gerar_texto_indicadores(df_email, "Consolidado Geral (Todas as Filiais e Lotes)")
                 for f_code in filiais_unicas:
                     df_fil = df_email[df_email['FILIAL'] == f_code]
                     if not df_fil.empty:
@@ -795,8 +769,7 @@ with aba3:
             html_cal += '[[table style="border-collapse: collapse; text-align: center; margin-top: 15px;"]]\n'
             html_cal += '[[tr]][[th style="border: none;"]][[/th]]\n'
             
-            for d in dates:
-                html_cal += f'[[th colspan="2" style="border: 1px solid #ccc; padding: 8px 15px; background-color: #f2f2f2; font-size: 16px;"]]{d.day}[[/th]]\n'
+            for d in dates: html_cal += f'[[th colspan="2" style="border: 1px solid #ccc; padding: 8px 15px; background-color: #f2f2f2; font-size: 16px;"]]{d.day}[[/th]]\n'
             html_cal += '[[/tr]]\n'
             
             for idx, row in df_grid.iterrows():
@@ -805,12 +778,9 @@ with aba3:
                 for d in dates:
                     d_label = d.strftime('%d/%m')
                     status = row[d_label]
-                    if status == "OK":
-                        cor_bg, cor_texto = '#a9d08e', '#333'
-                    elif status == "FALTOU":
-                        cor_bg, cor_texto = '#f4b084', '#333'
-                    else:
-                        cor_bg, cor_texto = '#ffffff', '#999'
+                    if status == "OK": cor_bg, cor_texto = '#a9d08e', '#333'
+                    elif status == "FALTOU": cor_bg, cor_texto = '#f4b084', '#333'
+                    else: cor_bg, cor_texto = '#ffffff', '#999'
                     html_cal += f'[[td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;"]]contagem[[/td]]\n'
                     html_cal += f'[[td style="border: 1px solid #ccc; background-color: {cor_bg}; color: {cor_texto}; padding: 8px 12px;"]]recontagem[[/td]]\n'
                 html_cal += '[[/tr]]\n'
@@ -826,7 +796,6 @@ with aba3:
             
             html_cal = html_cal.replace("[[", "<").replace("]]", ">")
             
-            # --- O BOTÃO SEGURO DE DOWNLOAD DO HTML ---
             st.download_button(
                 label="📥 Baixar E-mail Gerado (Abrir no navegador para copiar)",
                 data=html_cal.encode('utf-8'),
@@ -835,9 +804,7 @@ with aba3:
                 type="primary",
                 use_container_width=True
             )
-            
-    else:
-        st.info("O Histórico de Inventário está vazio. Salve algumas apurações diárias para poder gerar o reporte semanal.")
+    else: st.info("O Histórico de Inventário está vazio. Salve algumas apurações diárias para poder gerar o reporte semanal.")
 
 # --- ABA 4: PENDENTES (TRAVADOS NO SD1) ---
 with aba4:
@@ -847,7 +814,10 @@ with aba4:
         
         if not df_travado.empty:
             st.warning(f"Foram encontrados {len(df_travado)} itens nas contagens pendentes que estão travados na classificação fiscal (SD1). Eles não compõem os Resultados Gerenciais.")
-            st.dataframe(df_travado[["FILIAL", "CODIGO INTERNO", "DESCRIÇÃO", "CUSTO UNITARIO", "CONTAGEM 1"]], use_container_width=True, hide_index=True)
+            if 'ID_CONTAGEM' in df_travado.columns:
+                st.dataframe(df_travado[["FILIAL", "ID_CONTAGEM", "CODIGO INTERNO", "DESCRIÇÃO", "CUSTO UNITARIO", "CONTAGEM 1"]], use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(df_travado[["FILIAL", "CODIGO INTERNO", "DESCRIÇÃO", "CUSTO UNITARIO", "CONTAGEM 1"]], use_container_width=True, hide_index=True)
         else:
             st.success("Tudo limpo! Nenhum item das contagens atuais está retido no SD1.")
     else:
