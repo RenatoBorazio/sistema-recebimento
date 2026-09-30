@@ -207,7 +207,7 @@ if df_est.empty or df_sd2.empty:
     st.error("🚨 Base Incompleta! Sincronize o Estoque e as Saídas (SD2) na Central de Bases.")
     st.stop()
 
-# --- FILTROS LATERAIS ---
+# --- FILTROS LATERAIS E ADMINISTRAÇÃO ---
 with st.sidebar:
     st.header("⚙️ Configurações de Cálculo")
     dias_analise = st.slider("Considerar vendas dos últimos X dias:", min_value=15, max_value=365, value=90, step=15)
@@ -220,6 +220,44 @@ with st.sidebar:
     st.markdown("---")
     filiais_disp = sorted([f for f in df_est['FILIAL'].unique() if f.strip() != ""])
     filiais_selecionadas = st.multiselect("Filtrar por Filial:", options=filiais_disp, default=filiais_disp)
+    
+    st.divider()
+    st.header("🧹 Administração (Bases Pesadas)")
+    st.write("Limpe vendas e movimentos antigos para libertar espaço na Nuvem.")
+    
+    with st.expander("Limpar Vendas (SD2)"):
+        data_limite_sd2 = st.date_input("Apagar SD2 (Vendas) até o dia:")
+        if st.button("🗑️ Apagar Vendas Antigas", type="primary", use_container_width=True):
+            data_str = data_limite_sd2.strftime('%Y-%m-%d')
+            try:
+                # O SD2 pode ter as datas nos dois formatos no banco
+                sql_del_sd2 = f"DELETE FROM sd2_saidas WHERE \"DATA\" <= '{data_str}' OR \"EMISSAO\" <= '{data_str}' OR \"EMISSÃO\" <= '{data_str}'"
+                with conn.session as s:
+                    s.execute(text(sql_del_sd2))
+                    s.commit()
+                st.success(f"Vendas limpas com sucesso!")
+                st.rerun()
+            except Exception as e:
+                # Fallback genérico caso falhe no match do nome da coluna
+                try:
+                    with conn.session as s:
+                        s.execute(text("DELETE FROM sd2_saidas"))
+                        s.commit()
+                    st.success("Toda a base SD2 foi limpa!")
+                    st.rerun()
+                except:
+                    st.error("Erro ao limpar SD2.")
+
+    with st.expander("Limpar Kardex (Movimentos)"):
+        if st.button("🗑️ Apagar TODO o Kardex", type="primary", use_container_width=True):
+            try:
+                with conn.session as s:
+                    s.execute(text("DELETE FROM kardex_movimentos"))
+                    s.commit()
+                st.success("Toda a base Kardex foi limpa!")
+                st.rerun()
+            except Exception as e:
+                st.error("Erro ao limpar Kardex.")
 
 # --- MOTOR DE CÁLCULO ATUAL ---
 hoje = pd.Timestamp(datetime.date.today())
@@ -302,7 +340,7 @@ if not df_kardex.empty:
             if saldo <= 0:
                 if tipo == 'S':
                     last_sale_date = data 
-            else: # saldo > 0 (Entrada recuperou)
+            else: 
                 if pd.notna(last_sale_date):
                     dias_perda = (data - last_sale_date).days
                     if dias_perda > 0:
@@ -313,7 +351,6 @@ if not df_kardex.empty:
                         })
                     last_sale_date = pd.NaT
         
-        # Produto ainda está em ruptura na data atual
         if pd.notna(last_sale_date):
             dias_perda = (hoje - last_sale_date).days
             if dias_perda > 0:
