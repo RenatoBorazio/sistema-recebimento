@@ -388,7 +388,13 @@ with st.sidebar:
                     st.error(f"Erro ao limpar: {e}")
         else:
             st.info("O histórico de inventário está vazio.")
-            with st.expander("🚑 Restaurar Backup Perdido"):
+
+    if st.button("🗑️ Limpar Todas as Contagens Pendentes", use_container_width=True):
+        limpar_pendentes_geral()
+        st.success("Contagens pendentes limpas.")
+        st.rerun()
+
+    with st.expander("🚑 Restaurar Backup Perdido"):
         st.write("Suba o Excel de detalhamento de produtos para restaurar o histórico na nuvem.")
         arq_backup = st.file_uploader("Upload do Backup (Excel)", type=["xlsx", "xls"])
         per_backup = st.text_input("Qual o Período deste Backup? (Ex: P9)", value="P9")
@@ -397,34 +403,21 @@ with st.sidebar:
             if arq_backup:
                 with st.spinner("A reconstruir histórico..."):
                     try:
-                        # Lê o arquivo do backup
                         df_b = pd.read_excel(arq_backup)
-                        
-                        # Injeta as etiquetas obrigatórias que o sistema exige
                         df_b['PERIODO'] = per_backup
                         df_b['ID_CONTAGEM'] = "Backup Restaurado"
                         df_b['DISPONIVEL PARA INVENTARIO?'] = "SIM"
                         df_b['ARMAZEM'] = "01" 
                         df_b['CURVA'] = "C"
-                        
-                        # Formata as datas corretamente
                         if 'DATA' in df_b.columns:
                             df_b['DATA'] = df_b['DATA'].astype(str).str.split(' ').str[0]
-                        
-                        # Garante que a coluna de lotes existe e faz o append seguro
                         garantir_coluna("historico_inventario")
                         df_b.to_sql("historico_inventario", con=conn.engine, if_exists='append', index=False)
-                        
                         st.success("🎉 Backup restaurado com sucesso! Pode ir à aba 'Resultados Gerenciais'.")
                     except Exception as e:
                         st.error(f"Erro ao restaurar a base: {e}")
             else:
                 st.warning("Por favor, arraste o arquivo do backup primeiro.")
-
-    if st.button("🗑️ Limpar Todas as Contagens Pendentes", use_container_width=True):
-        limpar_pendentes_geral()
-        st.success("Contagens pendentes limpas.")
-        st.rerun()
 
 df_pendentes = carregar_pendentes()
 df_res_pendentes_global = pd.DataFrame() 
@@ -449,7 +442,7 @@ with aba1:
             with st.expander(f"⚙️ Apuração Pendente ({len(df_lote_c1)} itens na 1ª Contagem)", expanded=True):
                 col_del, _ = st.columns([2, 8])
                 with col_del:
-                    if st.button(f"🗑️ Excluir Contagem", key=f"del_c1_{lote}"):
+                    if st.button(f"🗑️️ Excluir Contagem", key=f"del_c1_{lote}"):
                         sql_del = f"DELETE FROM inventario_pendente WHERE \"ID_CONTAGEM\" = '{lote}'"
                         with conn.session as s:
                             s.execute(text(sql_del))
