@@ -442,7 +442,7 @@ with aba1:
             with st.expander(f"⚙️ Apuração Pendente ({len(df_lote_c1)} itens na 1ª Contagem)", expanded=True):
                 col_del, _ = st.columns([2, 8])
                 with col_del:
-                    if st.button(f"🗑️️ Excluir Contagem", key=f"del_c1_{lote}"):
+                    if st.button(f"🗑 Excluir Contagem", key=f"del_c1_{lote}"):
                         sql_del = f"DELETE FROM inventario_pendente WHERE \"ID_CONTAGEM\" = '{lote}'"
                         with conn.session as s:
                             s.execute(text(sql_del))
@@ -472,7 +472,18 @@ with aba1:
                 df_view = df_res.copy()
                 df_view['%DIV QTDE'] = (df_view['%DIV QTDE'] * 100).map("{:.2f}%".format)
                 df_view['%DIV VALOR'] = (df_view['%DIV VALOR'] * 100).map("{:.2f}%".format)
-                st.dataframe(df_view.drop(columns=['EAN OFICIAL (SB1)', 'FILIAL', 'ID_CONTAGEM']), use_container_width=True, hide_index=True)
+                
+                # Correção Visual: Formatador nativo de moeda no Streamlit
+                st.dataframe(
+                    df_view.drop(columns=['EAN OFICIAL (SB1)', 'FILIAL', 'ID_CONTAGEM']), 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "CUSTO UNITARIO": st.column_config.NumberColumn(format="R$ %.4f"),
+                        "VALOR INICIAL": st.column_config.NumberColumn(format="R$ %.2f"),
+                        "DIVERGENCIA DE VALOR": st.column_config.NumberColumn(format="R$ %.2f")
+                    }
+                )
                 
                 df_recontagem = df_res[(df_res['DIVERGENCIA DE SALDO'] != 0) & (df_res['DISPONIVEL PARA INVENTARIO?'] == 'SIM')].copy()
                 col_btn1, col_btn2 = st.columns([1, 1])
@@ -591,10 +602,10 @@ with aba2:
                         resumo_gerencial.append({
                             "PERÍODO": per_selecionado,
                             "RESULTADOS INVENTÁRIO": filial,
-                            "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
+                            "VALOR INICIAL": float(group['VALOR INICIAL'].sum()),
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                            "DIV. VALOR R\(": f"R\) {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. VALOR R$": float(group['DIVERGENCIA DE VALOR'].sum()),
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
                     df_detalhe = df_filtro.groupby(['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO'], as_index=False).agg({
@@ -607,17 +618,27 @@ with aba2:
                         except: data_formatada = str(data)
                         resumo_gerencial.append({
                             "DATA DA CONTAGEM": data_formatada, "RESULTADOS INVENTÁRIO": filial,
-                            "VALOR INICIAL": f"R$ {group['VALOR INICIAL'].sum():,.2f}",
+                            "VALOR INICIAL": float(group['VALOR INICIAL'].sum()),
                             "QTD. INICIAL": group['SALDO INICIAL'].sum(),
                             "QTD. CONTAGEM": group['CONTAGEM FINAL'].sum(),
-                            "DIV. VALOR R\(": f"R\) {group['DIVERGENCIA DE VALOR'].sum():,.2f}",
+                            "DIV. VALOR R$": float(group['DIVERGENCIA DE VALOR'].sum()),
                             "DIV. SALDO Pçs": group['DIVERGENCIA DE SALDO'].sum(),
                         })
                     df_detalhe = df_filtro[['DATA', 'FILIAL', 'ID_CONTAGEM', 'CODIGO INTERNO', 'DESCRIÇÃO', 'SALDO INICIAL', 'CONTAGEM FINAL', 'DIVERGENCIA DE SALDO', 'VALOR INICIAL', 'DIVERGENCIA DE VALOR']].copy()
                 
                 st.markdown("### 📋 Resumo Agregado")
                 df_resumo_gerencial = pd.DataFrame(resumo_gerencial)
-                st.dataframe(df_resumo_gerencial, use_container_width=True, hide_index=True)
+                
+                # Correção Visual: Deixa o Streamlit formatar a máscara R$ nativamente
+                st.dataframe(
+                    df_resumo_gerencial, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "VALOR INICIAL": st.column_config.NumberColumn(format="R$ %.2f"),
+                        "DIV. VALOR R\(": st.column_config.NumberColumn(format="R\) %.2f")
+                    }
+                )
                 
                 st.markdown("---")
                 st.markdown("### 🚨 Indicadores de Maior Impacto (Top 5)")
@@ -629,8 +650,15 @@ with aba2:
                     st.markdown("#### Maiores Variações de Valor (R$)")
                     top5_valor = df_detalhe.sort_values(by='ABS_DIV_VALOR', ascending=False).head(5)
                     view_top5_valor = top5_valor[['FILIAL', 'CODIGO INTERNO', 'DESCRIÇÃO', 'DIVERGENCIA DE VALOR']].copy()
-                    view_top5_valor['DIVERGENCIA DE VALOR'] = view_top5_valor['DIVERGENCIA DE VALOR'].apply(lambda x: f"R$ {x:,.2f}")
-                    st.dataframe(view_top5_valor, use_container_width=True, hide_index=True)
+                    
+                    st.dataframe(
+                        view_top5_valor, 
+                        use_container_width=True, 
+                        hide_index=True,
+                        column_config={
+                            "DIVERGENCIA DE VALOR": st.column_config.NumberColumn(format="R$ %.2f")
+                        }
+                    )
                 with col_t2:
                     st.markdown("#### Maiores Variações de Quantidade")
                     top5_saldo = df_detalhe.sort_values(by='ABS_DIV_SALDO', ascending=False).head(5)
@@ -640,7 +668,19 @@ with aba2:
                 st.markdown("---")
                 st.markdown("### 📦 Detalhamento por Produto")
                 df_detalhe_view = df_detalhe.drop(columns=['ABS_DIV_VALOR', 'ABS_DIV_SALDO'])
-                st.dataframe(df_detalhe_view, use_container_width=True, hide_index=True)
+                
+                st.dataframe(
+                    df_detalhe_view, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "VALOR INICIAL": st.column_config.NumberColumn(format="R$ %.2f"),
+                        "DIVERGENCIA DE VALOR": st.column_config.NumberColumn(format="R$ %.2f"),
+                        "SALDO INICIAL": st.column_config.NumberColumn(format="%.2f"),
+                        "CONTAGEM FINAL": st.column_config.NumberColumn(format="%.2f"),
+                        "DIVERGENCIA DE SALDO": st.column_config.NumberColumn(format="%.2f")
+                    }
+                )
                 
                 st.divider()
                 output_gerencial = io.BytesIO()
